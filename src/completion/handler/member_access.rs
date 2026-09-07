@@ -5,13 +5,14 @@
 use std::sync::Arc;
 
 use tower_lsp::lsp_types::{
-    CompletionContext, CompletionItem, CompletionList, CompletionResponse, Position,
+    CompletionContext, CompletionItem, CompletionList, CompletionResponse, CompletionTextEdit,
+    Position, Range, TextEdit,
 };
 
 use crate::Backend;
 use crate::class_lookup::find_class_at_offset;
 use crate::symbol_map::SymbolKind;
-use crate::text_position::position_to_offset;
+use crate::text_position::{offset_to_position, position_to_offset};
 use crate::type_engine::resolver::{ResolutionCtx, resolve_target_classes};
 use crate::types::{ClassInfo, CompletionTarget, FileContext, ResolvedType};
 
@@ -44,10 +45,17 @@ impl Backend {
 
         let cursor_offset = position_to_offset(content, position);
         let current_class = find_class_at_offset(&ctx.classes, cursor_offset);
-        let prefix = if completion_context.is_some() {
-            Self::member_completion_prefix(content, position)
-        } else {
-            String::new()
+        // Always compute the start of the identifier after the operator so we
+        // can set an explicit text_edit range later. Using prefix for filtering
+        // only when the completion was triggered by typing (context is Some).
+        let (prefix_start_offset, prefix) = {
+            let (start, raw) = Self::member_completion_prefix_with_start(content, position);
+            let prefix = if completion_context.is_some() {
+                raw
+            } else {
+                String::new()
+            };
+            (start, prefix)
         };
 
         let class_loader = self.class_loader(ctx);
@@ -190,6 +198,30 @@ impl Backend {
                 } else {
                     items
                 };
+
+                // ── Set explicit text_edit ranges ────────────────────────
+                // Without text_edit, some editors include `->` or `::` in the
+                // word they replace on accept.  Setting the range to cover only
+                // the partial identifier typed after the operator prevents that.
+                let edit_range = Range {
+                    start: offset_to_position(content, prefix_start_offset),
+                    end: position,
+                };
+                let items: Vec<CompletionItem> = items
+                    .into_iter()
+                    .map(|mut item| {
+                        if item.text_edit.is_none()
+                            && let Some(ref insert_text) = item.insert_text
+                        {
+                            item.text_edit = Some(CompletionTextEdit::Edit(TextEdit {
+                                range: edit_range,
+                                new_text: insert_text.clone(),
+                            }));
+                        }
+                        item
+                    })
+                    .collect();
+
                 let returned_count = items.len();
 
                 let elapsed = started.elapsed();
@@ -239,7 +271,13 @@ impl Backend {
         )
     }
 
-    fn member_completion_prefix(content: &str, position: Position) -> String {
+    /// Return `(start_byte_offset, prefix)` where `start_byte_offset` is the
+    /// byte position of the first character of the partial member name typed
+    /// after `->`, `?->`, or `::`, and `prefix` is that partial name.
+    ///
+    /// When the cursor is not directly after a member-access operator,
+    /// `start_byte_offset` equals `cursor_offset` and `prefix` is empty.
+    fn member_completion_prefix_with_start(content: &str, position: Position) -> (usize, String) {
         let cursor_offset = position_to_offset(content, position) as usize;
         let bytes = content.as_bytes();
         let mut start = cursor_offset.min(bytes.len());
@@ -260,10 +298,11 @@ impl Backend {
                 && bytes[start - 2] == b'-'
                 && bytes[start - 1] == b'>');
         if !has_member_operator {
-            return String::new();
+            return (cursor_offset, String::new());
         }
 
-        content[start..cursor_offset.min(content.len())].to_string()
+        let prefix = content[start..cursor_offset.min(content.len())].to_string();
+        (start, prefix)
     }
 
     fn filter_member_completion_items(
