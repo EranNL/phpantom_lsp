@@ -272,10 +272,10 @@ fn extract_array_key_text<'b>(key: &'b Expression<'b>) -> Option<String> {
 /// A scalar literal keeps its exact value here. The array's contents are
 /// fully known at the point the literal is written, so `[1, 1.5, '123']`
 /// records `1|1.5|'123'` and a read off it can still be proven `numeric`.
-/// Precision is given up where the array is *mutated* instead: a later
-/// push or keyed write widens through [`merge_push_type`] and friends,
-/// because a value arriving after construction says the array is being
-/// built up rather than written out.
+/// Precision is given up where the array is *mutated* inside a loop
+/// instead: a push or keyed write there widens before it reaches
+/// [`merge_push_type`] and friends, because a value arriving on every pass
+/// says the array is being built up rather than written out.
 ///
 /// [`merge_push_type`]: super::array_shape_writes::merge_push_type
 fn infer_element_type<'b>(

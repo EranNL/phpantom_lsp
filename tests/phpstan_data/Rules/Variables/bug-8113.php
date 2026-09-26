@@ -33,7 +33,7 @@ function () {
 		];
 		unset($review['SurveyInvitation']['review']);
 	}
-	assertType('array<array<mixed>>', $review); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+	assertType('array<array<mixed>>', $review);
 	if (array_key_exists('User', $review['Review'])) {
 		$review['User'] = $review['Review']['User'];
 		unset($review['Review']['User']);

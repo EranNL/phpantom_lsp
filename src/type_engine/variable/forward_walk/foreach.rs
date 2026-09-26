@@ -467,6 +467,7 @@ pub(crate) fn process_foreach<'b>(
     if value_docblock_override.is_none() {
         record_key_value_pairing(foreach, iter_type.as_ref(), scope, ctx);
     }
+    record_existing_keys(foreach, scope);
     // When the iterable is a bare `array` (no generic parameters)
     // and no @var docblock provided a concrete type, the element
     // type is `mixed`.  Seed it so that assignments from the loop
@@ -573,6 +574,7 @@ pub(crate) fn process_foreach<'b>(
             if value_docblock_override.is_none() {
                 record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
             }
+            record_existing_keys(foreach, next_scope);
         },
     );
 
@@ -583,10 +585,15 @@ pub(crate) fn process_foreach<'b>(
     // after the write the loop applies to the key it is visiting. A
     // `break` leaves some entries unvisited (and so unwritten), so the
     // rewrite-every-entry claim only holds when the loop always runs to
-    // its own end.
+    // its own end, and while the key the body wrote through is still the
+    // one the loop bound: a body that reassigned it wrote somewhere else.
     let own_key_write_element = own_key_write_target
         .as_ref()
-        .filter(|_| exits.breaks.is_empty() && !scope.unreachable)
+        .filter(|(array_var, key_var)| {
+            exits.breaks.is_empty()
+                && !scope.unreachable
+                && scope.is_existing_key(array_var, key_var)
+        })
         .and_then(|(array_var, _)| {
             let written = scope.get(array_var);
             (!written.is_empty()).then(|| (array_var.clone(), written.to_vec()))
@@ -721,6 +728,31 @@ fn record_key_value_pairing(
     // The key variable was just rebound, so whatever it stood for on the
     // previous iteration is gone.
     scope.implied_narrowings.insert(atom(key_var), proofs);
+}
+
+/// Record that the key a `foreach` binds is one the iterated array has, so a
+/// write through it inside the body lands on an entry that already exists.
+fn record_existing_keys(foreach: &Foreach<'_>, scope: &mut ScopeState) {
+    match &foreach.target {
+        ForeachTarget::KeyValue(kv) => {
+            let Expression::Variable(Variable::Direct(key_dv)) = kv.key else {
+                return;
+            };
+            let Some(subject) = narrowing::expr_to_subject_key(foreach.expression) else {
+                return;
+            };
+            let value_var = match kv.value {
+                Expression::Variable(Variable::Direct(dv)) => Some(bytes_to_str(dv.name)),
+                _ => None,
+            };
+            scope.record_foreach_keys(&subject, bytes_to_str(key_dv.name), value_var);
+        }
+        ForeachTarget::Value(_) => {
+            if let Some((array_var, key_var)) = foreach_own_keys(foreach) {
+                scope.record_foreach_keys(&array_var, &key_var, None);
+            }
+        }
+    }
 }
 
 /// The (array variable, key variable) a `foreach` binds when it walks an

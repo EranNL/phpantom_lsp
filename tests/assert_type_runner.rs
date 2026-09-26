@@ -570,9 +570,54 @@ fn normalize_type(ty: &str) -> String {
         .replace("array<mixed>", "array")
         .replace("non-empty-array<int|string, ", "non-empty-array<")
         .replace("non-empty-array<array-key, ", "non-empty-array<");
-    canonicalize_union_spelling(&number_positional_shape_entries(
-        &drop_sequential_shape_keys(&strip_template_scopes(&result)),
+    canonicalize_union_spelling(&strip_nested_grouping_parens(
+        &number_positional_shape_entries(&drop_sequential_shape_keys(&strip_template_scopes(
+            &result,
+        ))),
     ))
+}
+
+/// Drop the parentheses PHPStan puts around a union nested inside another
+/// type (a shape value, a generic argument), `array{a:(float|int)}`, which
+/// PHPantom prints bare. Only a `(` in a type position is a grouping one;
+/// the one opening a callable's parameter list follows its name.
+fn strip_nested_grouping_parens(ty: &str) -> String {
+    let mut out = String::with_capacity(ty.len());
+    let mut grouping: Vec<bool> = Vec::new();
+    let mut quote: Option<char> = None;
+    for ch in ty.chars() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            out.push(ch);
+            continue;
+        }
+        match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                out.push(ch);
+            }
+            '(' => {
+                let is_grouping = out
+                    .trim_end()
+                    .chars()
+                    .last()
+                    .is_some_and(|prev| matches!(prev, ':' | '<' | ',' | '{' | '|' | '&'));
+                grouping.push(is_grouping);
+                if !is_grouping {
+                    out.push(ch);
+                }
+            }
+            ')' => {
+                if !grouping.pop().unwrap_or(false) {
+                    out.push(ch);
+                }
+            }
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 /// Give the positional entries of every `array{…}` that also spells out a

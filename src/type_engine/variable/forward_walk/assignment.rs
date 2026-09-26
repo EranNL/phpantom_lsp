@@ -115,6 +115,14 @@ pub(crate) fn process_statement<'b>(
                                     &base_type, &keys,
                                 );
                             scope.set(&base_name, vec![ResolvedType::from_type_string(updated)]);
+                            let removed_from = super::array_assignment::array_write_synthetic_key(
+                                &base_name,
+                                &key_chain[..key_chain.len() - 1],
+                            );
+                            scope.note_element_write(
+                                removed_from.as_deref().unwrap_or(&base_name),
+                                true,
+                            );
                         }
                     }
                     _ => {}

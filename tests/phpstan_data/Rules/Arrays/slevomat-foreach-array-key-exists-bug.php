@@ -15,24 +15,24 @@ class Foo
 				if ($percentageInterval->isInInterval((float) $changeInPercents)) {
 					$key = $percentageInterval->getFormatted();
 					if (array_key_exists($key, $intervalResults)) {
-						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]);
 						$intervalResults[$key]['itemsCount'] += $itemsCount;
-						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]);
 					} else {
-						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
-						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
+						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: a read inside nested loops keeps the value an earlier pass of the outer loop saw, when the array was still empty
 						$intervalResults[$key] = [
 							'itemsCount' => $itemsCount,
 							'interval' => $percentageInterval,
 						];
-						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+						assertType('non-empty-array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
 						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]);
 					}
 				}
 			}
 		}
 
-		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults); // SKIP: array shape unions are merged differently: optional keys are lost and array|array{…} is not simplified
+		assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
 		foreach ($intervalResults as $data) {
 			echo $data['interval'];
 		}

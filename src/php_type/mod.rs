@@ -2906,20 +2906,32 @@ impl PhpType {
     ///
     /// A `non-empty-array`/`non-empty-list` (tracked by name, not by
     /// entries) loses that promise unconditionally: removing any one
-    /// element could have emptied it out entirely.
+    /// element could have emptied it out entirely. A `list<T>` that may
+    /// have lost an entry leaves a gap in its keys, so it becomes
+    /// `array<int, T>`.
     pub fn after_element_unset(&self, key: Option<&str>) -> PhpType {
         match self.kind() {
             TypeKind::Nullable(inner) => PhpType::nullable(inner.after_element_unset(key)),
             TypeKind::Union(members) => {
                 PhpType::union(members.iter().map(|m| m.after_element_unset(key)).collect())
             }
+            // A list has no string keys, so removing one leaves it as it was.
+            TypeKind::Named(name) if key.is_some() && is_list_name(name.as_str()) => self.clone(),
+            TypeKind::Generic(generic) if key.is_some() && is_list_name(generic.name.as_str()) => {
+                self.clone()
+            }
             TypeKind::Named(name) if name == "non-empty-array" => PhpType::named(atom("array")),
-            TypeKind::Named(name) if name == "non-empty-list" => PhpType::named(atom("list")),
+            TypeKind::Named(name) if is_list_name(name.as_str()) => {
+                PhpType::generic_array(PhpType::int(), PhpType::mixed())
+            }
             TypeKind::Generic(generic) if generic.name == "non-empty-array" => {
                 PhpType::generic_atom(atom("array"), generic.args.clone())
             }
-            TypeKind::Generic(generic) if generic.name == "non-empty-list" => {
-                PhpType::generic_atom(atom("list"), generic.args.clone())
+            TypeKind::Generic(generic) if is_list_name(generic.name.as_str()) => {
+                PhpType::generic_array(
+                    PhpType::int(),
+                    generic.args.first().cloned().unwrap_or_else(PhpType::mixed),
+                )
             }
             TypeKind::ArrayShape(entries) => {
                 let updated: Vec<ShapeEntry> = match key {

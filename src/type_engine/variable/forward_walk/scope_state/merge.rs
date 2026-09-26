@@ -19,6 +19,7 @@ impl ScopeState {
             || self.non_null_implications != other.non_null_implications
             || self.preg_outcomes != other.preg_outcomes
             || self.closure_captures != other.closure_captures
+            || self.key_facts != other.key_facts
             || !same_implied_narrowings(&self.implied_narrowings, &other.implied_narrowings)
         {
             return false;
@@ -113,6 +114,25 @@ impl ScopeState {
         if !self.closure_captures.is_empty() {
             self.closure_captures
                 .retain(|name, effects| other.closure_captures.get(name) == Some(effects));
+        }
+
+        // A key fact holds past the join only where every path left it
+        // standing.
+        if let Some(facts) = self.key_facts.as_mut() {
+            match other.key_facts.as_deref() {
+                Some(theirs) => {
+                    facts
+                        .existing_keys
+                        .retain(|fact| theirs.existing_keys.contains(fact));
+                    facts
+                        .key_set_aliases
+                        .retain(|alias| theirs.key_set_aliases.contains(alias));
+                    if facts.existing_keys.is_empty() && facts.key_set_aliases.is_empty() {
+                        self.key_facts = None;
+                    }
+                }
+                None => self.key_facts = None,
+            }
         }
 
         for (name, other_types) in &other.locals {

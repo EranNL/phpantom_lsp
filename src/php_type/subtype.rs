@@ -295,6 +295,16 @@ impl PhpType {
             if let TypeKind::Array(inner) = supertype.kind() {
                 return entries.iter().all(|e| e.value_type.is_subtype_of(inner));
             }
+
+            // ArrayShape <: ArrayShape — every key the shape may hold is one
+            // the wider shape allows, with a value it allows, and the wider
+            // shape requires no key the shape may lack.
+            if let TypeKind::ArrayShape(wider) = supertype.kind() {
+                if supertype.is_list_shape() && !is_list {
+                    return false;
+                }
+                return shape_is_subshape(entries, wider);
+            }
         }
 
         // ── ObjectShape <: object ───────────────────────────────────
@@ -439,6 +449,25 @@ impl PhpType {
 /// `array-key`, and a one-argument `iterable<V>` on `mixed` (a
 /// `Traversable` may yield any key type). Returns `None` for arities that
 /// carry no key/value meaning.
+fn shape_is_subshape(entries: &[ShapeEntry], wider: &[ShapeEntry]) -> bool {
+    let (Some(keys), Some(wider_keys)) = (runtime_shape_keys(entries), runtime_shape_keys(wider))
+    else {
+        return false;
+    };
+    entries.iter().zip(&keys).all(|(entry, key)| {
+        wider_keys
+            .iter()
+            .position(|wider_key| wider_key == key)
+            .is_some_and(|index| {
+                (!entry.optional || wider[index].optional)
+                    && entry.value_type.is_subtype_of(&wider[index].value_type)
+            })
+    }) && wider
+        .iter()
+        .zip(&wider_keys)
+        .all(|(entry, key)| entry.optional || keys.contains(key))
+}
+
 pub(crate) fn array_like_key_value(generic: &GenericType) -> Option<(PhpType, &PhpType)> {
     match generic.args.as_slice() {
         [value] => {

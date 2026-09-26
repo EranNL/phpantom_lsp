@@ -28,7 +28,7 @@ class HelloWorld
 			unset($list[$k]['abc']);
 			assertType('array<string, string>', $list[$k]);
 		}
-		assertType('list<array<string, string>>', $list); // SKIP: writes through a list's own keys drop list (and mark it non-empty), while unset() of an element keeps it
+		assertType('list<array<string, string>>', $list);
 	}
 
 	/**
@@ -50,7 +50,7 @@ class HelloWorld
 			if (rand(0,1)) {
 				unset($list[$k]);
 			}
-			assertType('array<int, array<string, string>>', $list); // SKIP: writes through a list's own keys drop list (and mark it non-empty), while unset() of an element keeps it
+			assertType('array<int, array<string, string>>', $list);
 			assertType('array<string, string>', $list[$k]);
 		}
 		assertType('array<string, string>', $list[$k]);

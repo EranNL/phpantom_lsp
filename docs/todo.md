@@ -107,12 +107,10 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B486 | [A type alias on a member declared in another file is left unexpanded](todo/bugs.md#b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded) | Medium | High |
 | B485 | [The key of a `foreach` over a list is `int`, not `int<0, max>`](todo/bugs.md#b485-the-key-of-a-foreach-over-a-list-is-int-not-int0-max) | Low-Medium | Low |
-| B456 | [Writes through a list's own keys drop `list`, while `unset()` of an element keeps it](todo/bugs.md#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
 | B482 | [`__PROPERTY__` inside a property hook resolves to its base type rather than its value](todo/bugs.md#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value) | Low | Low |
 | B484 | [`extract()` with flags or a non-shape array leaves the locals untouched](todo/bugs.md#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched) | Low | Medium |
-| B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
-| B483 | [Appending a literal to a declared array widens it to its base type](todo/bugs.md#b483-appending-a-literal-to-a-declared-array-widens-it-to-its-base-type) | Low | Low-Medium |
+| B487 | [A read inside nested loops keeps what an earlier pass of the outer loop saw](todo/bugs.md#b487-a-read-inside-nested-loops-keeps-what-an-earlier-pass-of-the-outer-loop-saw) | Low | Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
 | B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |
 | B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |

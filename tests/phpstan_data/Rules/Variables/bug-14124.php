@@ -29,5 +29,5 @@ function example3b(array &$convert): void
 			$convert[$outerKey][$key] = strtoupper($val);
 		}
 	}
-	assertType('array<string, list<string>>', $convert); // SKIP: writes through a list's own keys drop list (and mark it non-empty), while unset() of an element keeps it
+	assertType('array<string, list<string>>', $convert);
 }

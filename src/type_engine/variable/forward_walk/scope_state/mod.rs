@@ -194,6 +194,25 @@ impl ScopeProofs<'_> {
     }
 }
 
+/// Which keys arrays are known to hold on one path, for writing through
+/// a key PHP already has.
+///
+/// A write through such a key lands on an entry that is already there, so
+/// it keeps the array's key type, its list promise, and whatever it said
+/// about being empty. PHPStan calls this a write to an existing offset.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct KeyFacts {
+    /// (array subject key, key variable) pairs: the key variable holds a
+    /// key the array has, because a `foreach` over the array bound it and
+    /// nothing since has removed an entry.
+    pub existing_keys: Vec<(Atom, Atom)>,
+    /// Pairs of subject keys known to hold the same keys: the value
+    /// variable a keyed `foreach` binds and the element it was read from
+    /// (`$inner` and `$convert[$outerKey]`). A key a nested `foreach` over
+    /// one of them binds is then an existing key of the other as well.
+    pub key_set_aliases: Vec<(Atom, Atom)>,
+}
+
 /// The type-state of all variables at a single program point.
 ///
 /// This is the equivalent of PHPStan's `expressionTypes` map and Mago's
@@ -295,6 +314,11 @@ pub(crate) struct ScopeState {
     /// a variable's identity.
     pub closure_captures: AtomMap<Vec<ClosureCaptureEffect>>,
 
+    /// What this path knows about which keys arrays hold; see
+    /// [`KeyFacts`]. Boxed and `None` while there is nothing to say, which
+    /// is almost always: scopes are cloned and cached by the thousand.
+    pub key_facts: Option<Box<KeyFacts>>,
+
     /// No value can reach this program point.
     ///
     /// Set when a condition narrows some variable down to nothing — the
@@ -328,6 +352,7 @@ impl ScopeState {
             unresolved: AtomSet::default(),
             ruled_out: AtomMap::default(),
             closure_captures: AtomMap::default(),
+            key_facts: None,
             unreachable: false,
         }
     }
@@ -563,6 +588,106 @@ impl ScopeState {
         }
         if !self.ruled_out.is_empty() {
             self.ruled_out.retain(|subject, _| !stale(subject));
+        }
+        self.retain_key_facts(
+            |subject, key_var| !stale(subject) && *key_var != key,
+            |side| !stale(side),
+        );
+    }
+
+    /// Whether `key_var` holds a key the array `subject` is known to have.
+    pub fn is_existing_key(&self, subject: &str, key_var: &str) -> bool {
+        self.key_facts.as_ref().is_some_and(|facts| {
+            facts
+                .existing_keys
+                .iter()
+                .any(|(s, k)| s.as_str() == subject && k.as_str() == key_var)
+        })
+    }
+
+    /// Record that a `foreach` over `subject` just bound `key_var` to one of
+    /// its keys, and `value_var` (when there is one) to the entry there.
+    ///
+    /// Whatever the two variables stood for on the previous iteration is
+    /// dropped first. A key of `subject` is also a key of every subject
+    /// known to hold the same keys, and the entry there holds the same keys
+    /// as the value variable does.
+    pub fn record_foreach_keys(&mut self, subject: &str, key_var: &str, value_var: Option<&str>) {
+        let key = atom(key_var);
+        let names_a_bound_var = |side: &Atom| {
+            let reads = |var: &str| {
+                side.as_str() == var
+                    || crate::type_engine::types::narrowing::key_reads_variable(side, var)
+            };
+            reads(key_var) || value_var.is_some_and(reads)
+        };
+        self.retain_key_facts(
+            |s, k| *k != key && !names_a_bound_var(s),
+            |side| !names_a_bound_var(side),
+        );
+        let facts = self.key_facts.get_or_insert_with(Box::default);
+        let subject_atom = atom(subject);
+        let mut subjects = vec![subject_atom];
+        for (a, b) in &facts.key_set_aliases {
+            if *a == subject_atom {
+                subjects.push(*b);
+            } else if *b == subject_atom {
+                subjects.push(*a);
+            }
+        }
+        for s in &subjects {
+            facts.existing_keys.push((*s, key));
+        }
+        if let Some(value_var) = value_var {
+            let value = atom(value_var);
+            for s in subjects {
+                facts
+                    .key_set_aliases
+                    .push((value, atom(&format!("{s}[{key_var}]"))));
+            }
+        }
+    }
+
+    /// Drop what an element write or removal on the array `subject` may
+    /// have invalidated.
+    ///
+    /// `keys_lost` marks a write that replaced the value at `subject`, or an
+    /// `unset()` that removed one of its entries: every key fact about
+    /// `subject` and what is read through it goes. Otherwise the write only
+    /// added a key to it, which keeps the keys every subject is known to
+    /// have but ends any claim that another subject holds the same ones.
+    pub fn note_element_write(&mut self, subject: &str, keys_lost: bool) {
+        if self.key_facts.is_none() {
+            return;
+        }
+        let at_or_below = |side: &Atom| {
+            side.as_str() == subject
+                || crate::type_engine::types::narrowing::key_reads_variable(side, subject)
+        };
+        if keys_lost {
+            self.retain_key_facts(|s, _| !at_or_below(s), |side| !at_or_below(side));
+        } else {
+            self.retain_key_facts(|_, _| true, |side| side.as_str() != subject);
+        }
+    }
+
+    /// Keep the existing-key facts `keep_key` accepts and the aliases whose
+    /// both sides `keep_side` accepts, going back to `None` once nothing is
+    /// left.
+    fn retain_key_facts(
+        &mut self,
+        keep_key: impl Fn(&Atom, &Atom) -> bool,
+        keep_side: impl Fn(&Atom) -> bool,
+    ) {
+        let Some(facts) = self.key_facts.as_mut() else {
+            return;
+        };
+        facts.existing_keys.retain(|(s, k)| keep_key(s, k));
+        facts
+            .key_set_aliases
+            .retain(|(a, b)| keep_side(a) && keep_side(b));
+        if facts.existing_keys.is_empty() && facts.key_set_aliases.is_empty() {
+            self.key_facts = None;
         }
     }
 

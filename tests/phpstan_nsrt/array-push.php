@@ -27,7 +27,7 @@ function arrayPush(array $a, array $b, array $c, array $d, array $e, array $arr)
 	assertType('array<int>', $b);
 
 	array_push($c, ...[19, 'baz', false]);
-	assertType('non-empty-array<\'baz\'|int|false>', $c); // SKIP: a literal pushed into a declared array is widened to its base type
+	assertType('non-empty-array<\'baz\'|int|false>', $c);
 
 	/** @var array<bool|null> $d1 */
 	$d1 = [];

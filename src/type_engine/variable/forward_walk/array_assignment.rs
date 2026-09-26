@@ -300,6 +300,7 @@ pub(crate) fn process_array_push_call<'b>(
         apply_array_push(&base_type, &values, ctx.in_loop)
     };
     scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    scope.note_element_write(base_name, false);
     true
 }
 
@@ -367,10 +368,21 @@ fn apply_array_write<'b>(
         return;
     }
 
+    // The subject each segment writes into: `$a`, then `$a[$k]`, and so on.
+    // `None` once a segment is not one a subject key can spell. Only worth
+    // spelling out while some key fact could be about one of them.
+    let subjects: Vec<Option<String>> = if scope.key_facts.is_none() {
+        Vec::new()
+    } else {
+        (0..=key_chain.len())
+            .map(|depth| array_write_synthetic_key(base_name, &key_chain[..depth]))
+            .collect()
+    };
     let mut write_keys: Vec<super::super::array_shape_writes::ArrayWriteKey> = key_chain
         .iter()
-        .map(
-            |idx| match super::super::array_shape_writes::extract_array_key_for_shape(idx) {
+        .enumerate()
+        .map(|(depth, idx)| {
+            match super::super::array_shape_writes::extract_array_key_for_shape(idx) {
                 Some(key) => super::super::array_shape_writes::ArrayWriteKey::Shape(key),
                 None => {
                     let index_types = resolve_rhs_with_scope(idx, scope, ctx);
@@ -380,10 +392,15 @@ fn apply_array_write<'b>(
                             &index_types,
                         ),
                         slot: super::super::array_shape_writes::extract_array_write_index(idx),
+                        existing: is_existing_key_write(
+                            subjects.get(depth).and_then(Option::as_deref),
+                            idx,
+                            scope,
+                        ),
                     }
                 }
-            },
-        )
+            }
+        })
         .collect();
     if append {
         write_keys.push(super::super::array_shape_writes::ArrayWriteKey::Append);
@@ -396,9 +413,57 @@ fn apply_array_write<'b>(
         ctx.in_loop,
     );
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
+    note_element_write(base_name, &subjects, &write_keys, append, scope);
 
     if !append {
         overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+    }
+}
+
+/// Whether the index `idx` writing into `subject` is a variable holding a
+/// key the array is known to have.
+fn is_existing_key_write(subject: Option<&str>, idx: &Expression<'_>, scope: &ScopeState) -> bool {
+    let (Some(subject), Expression::Variable(Variable::Direct(dv))) = (subject, idx) else {
+        return false;
+    };
+    scope.is_existing_key(subject, bytes_to_str(dv.name))
+}
+
+/// Drop the key facts an element write invalidated: each level it added a
+/// key to no longer holds the same keys as anything else, and the value it
+/// replaced says nothing about the keys it held before.
+fn note_element_write(
+    base_name: &str,
+    subjects: &[Option<String>],
+    write_keys: &[super::super::array_shape_writes::ArrayWriteKey],
+    append: bool,
+    scope: &mut ScopeState,
+) {
+    if scope.key_facts.is_none() {
+        return;
+    }
+    let depth = write_keys.len() - usize::from(append);
+    for (level, key) in write_keys.iter().enumerate() {
+        let adds_key = !matches!(
+            key,
+            super::super::array_shape_writes::ArrayWriteKey::Keyed { existing: true, .. }
+        );
+        if !adds_key {
+            continue;
+        }
+        match subjects.get(level).cloned().flatten() {
+            Some(subject) => scope.note_element_write(&subject, false),
+            None => {
+                scope.note_element_write(base_name, true);
+                return;
+            }
+        }
+    }
+    if !append {
+        match subjects.get(depth).cloned().flatten() {
+            Some(subject) => scope.note_element_write(&subject, true),
+            None => scope.note_element_write(base_name, true),
+        }
     }
 }
 
@@ -438,7 +503,10 @@ fn overwrite_written_offset(
 /// text [`narrowing::expr_to_subject_key`] builds for a read of the same
 /// subject (`$tmp[$key]`, `$a["x"][$i]`), so a write can find and
 /// overwrite whatever narrowing recorded under that key.
-fn array_write_synthetic_key(base_name: &str, key_chain: &[&Expression<'_>]) -> Option<String> {
+pub(super) fn array_write_synthetic_key(
+    base_name: &str,
+    key_chain: &[&Expression<'_>],
+) -> Option<String> {
     let mut key = base_name.to_string();
     for index in key_chain {
         if let Some(literal) = narrowing::array_index_literal_key(index) {

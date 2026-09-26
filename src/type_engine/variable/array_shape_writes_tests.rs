@@ -84,6 +84,7 @@ fn element_writes_refine_the_type_they_are_written_into() {
             vec![ArrayWriteKey::Keyed {
                 key_type: PhpType::string(),
                 slot: None,
+                existing: false,
             }],
             "int",
         ),
@@ -97,6 +98,7 @@ fn element_writes_refine_the_type_they_are_written_into() {
             vec![ArrayWriteKey::Keyed {
                 key_type: PhpType::int(),
                 slot: Some(1),
+                existing: false,
             }],
             "string",
         ),
@@ -138,6 +140,7 @@ fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
     let slot = |index: usize| ArrayWriteKey::Keyed {
         key_type: PhpType::literal_int(index.to_string()),
         slot: Some(index),
+        existing: false,
     };
 
     assert_eq!(
@@ -160,6 +163,7 @@ fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
                 ArrayWriteKey::Keyed {
                     key_type: PhpType::string(),
                     slot: None,
+                    existing: false,
                 },
                 slot(3),
             ],
@@ -176,6 +180,7 @@ fn a_write_into_a_union_of_shapes_updates_each_shape() {
     let slot = ArrayWriteKey::Keyed {
         key_type: PhpType::literal_int("3"),
         slot: Some(3),
+        existing: false,
     };
     assert_eq!(
         merge_nested_array_write(
@@ -281,7 +286,7 @@ fn mutable_collection_merges_normalize_complete_existing_domains() {
     assert_eq!(
         merge_push_type(
             &PhpType::parse("list<'existing'>"),
-            &PhpType::literal_string_raw("'new'"),
+            &PhpType::literal_string_raw("'new'").widen_scalar_literals(),
         ),
         PhpType::parse("list<string>")
     );

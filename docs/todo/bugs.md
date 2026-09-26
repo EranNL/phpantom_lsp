@@ -112,60 +112,27 @@ function f(array $l) {
 
 A list's keys are the non-negative integers, so iterating one binds the key to `int<0, max>`, whether the list is declared or built by `$out[] = …` in the same function. Storing the key where `int<0, max>` is declared then fails the argument check: PHPStan's own `IgnoredErrorHelper::process()` passes `['index' => $i, …]` from such a loop to a parameter typed `array{index: int<0, max>, …}` and is reported.
 
-### B456. Writes through a list's own keys drop `list`, while `unset()` of an element keeps it
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @param list<array<string, string>> $list */
-function f(array $list) {
-    foreach ($list as $k => $v) {
-        unset($list[$k]['abc']);
-    }
-    $list; // should be list<array<string, string>>, is array<int, ...>
-
-    foreach ($list as $k => $v) {
-        if (rand(0, 1)) { unset($list[$k]); }
-    }
-    $list; // should be array<int, ...>, is list<...>
-}
-```
-
-Writing to (or unsetting inside) an element the list already has keeps it a list. Removing an element does not: it leaves a gap in the keys. Both are backwards today. Writing through the keys of a `foreach` also marks the outer array non-empty, though the loop may not have run at all.
-
-Found porting PHPStan's `Rules/Methods/data/bug-12927.php`, `Rules/Variables/data/bug-14124.php` and `Rules/Variables/data/bug-14124b.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B460. Array shape unions are merged differently from PHPStan
+### B487. A read inside nested loops keeps what an earlier pass of the outer loop saw
 **Impact: Low · Complexity: Medium**
 
 ```php
-/** @var mixed[][] $review */
-$review = ['Review' => ['id' => 23], /* … */];
-if ($cond) {
-    $review['Review'] = ['id' => null, 'text' => null];
-}
-$review; // should be array<array<mixed>>, is array<int|string, array|array{id: null, text: null}>
-```
-
-Joining branches that wrote different shapes leaves a redundant `array|array{…}` union where the shape is already covered by `array`, and joining shapes with differing optional keys (`Rules/Comparison/data/bug-7898.php`) marks keys required that only one branch set.
-
-A shape a sibling variant already covers is kept beside it as well: the passes of a loop that writes `['count' => $n, 'item' => $item]` into an array leave `array{count: int|float, item: mixed}` beside `array{count: mixed, item: mixed}`, and an `array{}` that `array<K, V>` covers makes an offset read on the joined array include `null`.
-
-Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php`, `Rules/Methods/data/bug-5749.php` and `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B483. Appending a literal to a declared array widens it to its base type
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @param non-empty-array<int> $c */
-function f(array $c) {
-    array_push($c, 19, 'baz', false);
-    $c; // should be non-empty-array<'baz'|int|false>, is non-empty-array<int|string|false>
+function f(array $percentageIntervals, array $changes): void {
+    $intervalResults = [];
+    foreach ($percentageIntervals as $interval) {
+        foreach ($changes as $change) {
+            $key = $interval->getFormatted();
+            if (!array_key_exists($key, $intervalResults)) {
+                $x = $intervalResults[$key]; // should be array{itemsCount: mixed, interval: mixed}, is null|array{…}
+                $intervalResults[$key] = ['itemsCount' => $change, 'interval' => $interval];
+            }
+        }
+    }
 }
 ```
 
-A keyed write outside a loop keeps the literal it stores, and so does an append onto a tracked shape, but an append (`$c[] = 'baz'`, or `array_push()`) onto an `array<K, V>` or `list<T>` still widens the value to its base type. Loop bodies should keep widening, as keyed writes do.
+The array itself reads back as `array<array{…}>` at that point. The `null` comes from the outer loop's first pass, when `$intervalResults` was still `[]`: the assignment's type is the union of every pass that reached it rather than what the loop's fixed point holds. A single loop, or a key that is not reassigned inside the inner loop, does not show it.
 
-Found porting PHPStan's `Analyser/nsrt/array-push.php` and `array-unshift.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
+Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
 ## Laravel
 
