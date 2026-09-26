@@ -75,8 +75,8 @@ pub(crate) use reflection::{
     resolve_reflected_property_at_new,
 };
 pub(crate) use return_types::{
-    MethodReturnCtx, folded_class_constant_type, folded_global_constant_type, literal_arg_type,
-    qualify_class_keyword, resolve_static_access_type,
+    MethodReturnCtx, class_constant_type, enum_case_property_literal, folded_global_constant_type,
+    literal_arg_type, resolve_static_access_type,
 };
 pub(crate) use target_cache::{
     activate_type_engine_caches, body_inference_in_progress, call_site_param_types,

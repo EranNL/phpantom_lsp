@@ -22,7 +22,7 @@ class A
  */
 function x($t): void
 {
-	assertType('class-string<T of Bug7823\\A (function Bug7823\\x(), argument)>', $t::class); // SKIP: $value::class resolves to nothing
+	assertType('class-string<T of Bug7823\\A (function Bug7823\\x(), argument)>', $t::class); // SKIP: a method template with a bound is shown as its bound inside the method
 	sayHello($t::class);
 }
 
@@ -41,7 +41,7 @@ function y($t): void
  */
 function z($t): void
 {
-	assertType('class-string<Z (function Bug7823\\z(), argument)>', $t::class); // SKIP: $value::class resolves to nothing
+	assertType('class-string<Z (function Bug7823\\z(), argument)>', $t::class);
 	sayHello($t::class);
 }
 
@@ -50,6 +50,6 @@ function z($t): void
  */
 function a($o): void
 {
-	assertType('class-string', $o::class); // SKIP: $value::class resolves to nothing
+	assertType('class-string', $o::class);
 	sayHello($o::class);
 }

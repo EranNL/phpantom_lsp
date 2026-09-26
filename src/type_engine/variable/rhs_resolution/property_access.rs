@@ -93,133 +93,126 @@ pub(super) fn resolve_rhs_property_access(
     // ── Class constant / enum case access: `Foo::BAR` ──
     // When the RHS is a class constant access, resolve the class and
     // check whether the constant is an enum case (→ type is the enum
-    // itself) or a typed constant (→ use its type_hint).
+    // itself) or a class constant (→ the type it holds).
     if let Access::ClassConstant(cca) = access {
-        let class_name = crate::class_lookup::class_expression_name(
+        let const_name = match &cca.constant {
+            ClassLikeConstantSelector::Identifier(ident) => {
+                Some(bytes_to_str(ident.value).to_string())
+            }
+            _ => None,
+        };
+        let is_class_fetch = const_name.as_deref() == Some("class");
+
+        let target_classes = match crate::class_lookup::class_expression_name(
             cca.class,
             ctx.current_class,
             ctx.class_loader,
-        );
-        if let Some(class_name) = class_name {
-            let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
-            let resolved_typed = PhpType::named(atom(resolved_name));
-            let target_classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                &resolved_typed,
-                current_class_name,
-                all_classes,
-                class_loader,
-            );
+        ) {
+            Some(class_name) => {
+                let resolved_name = class_name.strip_prefix('\\').unwrap_or(&class_name);
+                let resolved_typed = PhpType::named(atom(resolved_name));
+                let target_classes =
+                    crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                        &resolved_typed,
+                        current_class_name,
+                        all_classes,
+                        class_loader,
+                    );
 
-            let const_name = match &cca.constant {
-                ClassLikeConstantSelector::Identifier(ident) => {
-                    Some(bytes_to_str(ident.value).to_string())
+                // The magic `::class` constant yields the fully-qualified name
+                // of the class as a `class-string<T>`. Resolving it to a plain
+                // `string` would discard the class identity, so downstream
+                // consumers (array element inference, `??` fallbacks, and
+                // `class-string<object>` parameters) keep the concrete class.
+                if is_class_fetch {
+                    // The identifier is spelled as the source writes it, which
+                    // for a name reached through a namespace import
+                    // (`Support\Pen` behind `use App\Support;`) is neither the
+                    // FQCN nor resolvable on its own once the class-string
+                    // leaves this file's context.  Prefer the resolved class.
+                    let named = match target_classes.first() {
+                        Some(cls) => PhpType::named(cls.fqn()),
+                        None => PhpType::named(atom(resolved_name)),
+                    };
+                    return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
+                        named,
+                    )))];
                 }
-                _ => None,
+                target_classes
+            }
+            // `$value::class` / `$value::CONST` (PHP 8.0+): the class is
+            // whatever the expression holds.
+            None => {
+                let held = resolve_rhs_expression(cca.class, ctx);
+                if is_class_fetch {
+                    return class_fetch_on_value(&held);
+                }
+                let mut classes: Vec<Arc<ClassInfo>> = Vec::new();
+                for rt in &held {
+                    if let Some(cls) = &rt.class_info
+                        && !classes.iter().any(|c| c.fqn() == cls.fqn())
+                    {
+                        classes.push(Arc::clone(cls));
+                    }
+                }
+                if classes.is_empty()
+                    && let Some(name) = super::instantiation::extract_class_string_inner(&held)
+                    && let Some(cls) = class_loader(&name)
+                {
+                    classes.push(cls);
+                }
+                classes
+            }
+        };
+
+        if let Some(const_name) = const_name {
+            // Search local classes first.  If the constant is not
+            // found, resolve via full inheritance merging so that
+            // constants from parent classes are visible (e.g.
+            // `self::PARENT_CONST` in a subclass).
+            let merged_classes: Vec<Arc<ClassInfo>>;
+            let all_candidates: &[Arc<ClassInfo>] = if target_classes
+                .iter()
+                .any(|cls| cls.constants.iter().any(|c| c.name == const_name))
+            {
+                &target_classes
+            } else {
+                merged_classes = target_classes
+                    .iter()
+                    .map(|cls| {
+                        crate::virtual_members::resolve_class_fully_maybe_cached(
+                            cls,
+                            class_loader,
+                            ctx.resolved_class_cache,
+                        )
+                    })
+                    .collect();
+                &merged_classes
             };
 
-            // The magic `::class` constant yields the fully-qualified name
-            // of the class as a `class-string<T>`. Resolving it to a plain
-            // `string` would discard the class identity, so downstream
-            // consumers (array element inference, `??` fallbacks, and
-            // `class-string<object>` parameters) keep the concrete class.
-            if const_name.as_deref() == Some("class") {
-                // The identifier is spelled as the source writes it, which
-                // for a name reached through a namespace import
-                // (`Support\Pen` behind `use App\Support;`) is neither the
-                // FQCN nor resolvable on its own once the class-string
-                // leaves this file's context.  Prefer the resolved class.
-                let named = match target_classes.first() {
-                    Some(cls) => PhpType::named(cls.fqn()),
-                    None => PhpType::named(atom(resolved_name)),
-                };
-                return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
-                    named,
-                )))];
-            }
-
-            if let Some(const_name) = const_name {
-                // Search local classes first.  If the constant is not
-                // found, resolve via full inheritance merging so that
-                // constants from parent classes are visible (e.g.
-                // `self::PARENT_CONST` in a subclass).
-                let merged_classes: Vec<Arc<ClassInfo>>;
-                let all_candidates: &[Arc<ClassInfo>] = if target_classes
-                    .iter()
-                    .any(|cls| cls.constants.iter().any(|c| c.name == const_name))
-                {
-                    &target_classes
-                } else {
-                    merged_classes = target_classes
-                        .iter()
-                        .map(|cls| {
-                            crate::virtual_members::resolve_class_fully_maybe_cached(
-                                cls,
+            for cls in all_candidates {
+                // Check if the constant is an enum case — the
+                // result type is the enum class itself.
+                if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {
+                    if c.is_enum_case {
+                        return ResolvedType::from_classes(target_classes);
+                    }
+                    if let Some(ts) = crate::type_engine::call_resolution::class_constant_type(
+                        cls,
+                        &const_name,
+                        &ctx.as_resolution_ctx(),
+                    ) {
+                        let resolved =
+                            crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                                &ts,
+                                current_class_name,
+                                all_classes,
                                 class_loader,
-                                ctx.resolved_class_cache,
-                            )
-                        })
-                        .collect();
-                    &merged_classes
-                };
-
-                for cls in all_candidates {
-                    // Check if the constant is an enum case — the
-                    // result type is the enum class itself.
-                    if let Some(c) = cls.constants.iter().find(|c| c.name == const_name) {
-                        if c.is_enum_case {
-                            return ResolvedType::from_classes(target_classes);
+                            );
+                        if !resolved.is_empty() {
+                            return ResolvedType::from_classes_with_hint(resolved, ts);
                         }
-                        // Typed class constant — resolve via type_hint.
-                        if let Some(ref th) = c.type_hint {
-                            let resolved =
-                                crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                    th,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                            if !resolved.is_empty() {
-                                return ResolvedType::from_classes_with_hint(resolved, th.clone());
-                            }
-                        }
-                        // No type_hint — infer from the initializer value,
-                        // folding an initialiser that names other constants
-                        // (`const FLAGS = JSON_THROW_ON_ERROR;`) to the value
-                        // it holds.
-                        if let Some(ref val) = c.value
-                            && let Some(ts) = {
-                                let resolution_ctx = ctx.as_resolution_ctx();
-                                let resolve = |text: &str| {
-                                    crate::Backend::resolve_arg_text_to_type(
-                                        &crate::type_engine::call_resolution::qualify_class_keyword(
-                                            text, cls,
-                                        ),
-                                        &resolution_ctx,
-                                    )
-                                };
-                                super::infer_type_from_constant_value_resolved(val, &resolve)
-                                    .or_else(|| {
-                                        crate::type_engine::call_resolution::folded_class_constant_type(
-                                            cls,
-                                            &const_name,
-                                            val,
-                                            &resolution_ctx,
-                                        )
-                                    })
-                            }
-                        {
-                            let resolved =
-                                crate::type_engine::type_resolution::type_hint_to_classes_typed(
-                                    &ts,
-                                    current_class_name,
-                                    all_classes,
-                                    class_loader,
-                                );
-                            if !resolved.is_empty() {
-                                return ResolvedType::from_classes_with_hint(resolved, ts);
-                            }
-                            return vec![ResolvedType::from_type_string(ts)];
-                        }
+                        return vec![ResolvedType::from_type_string(ts)];
                     }
                 }
             }
@@ -302,6 +295,25 @@ pub(super) fn resolve_rhs_property_access(
             _ => None,
         };
         if let Some(prop_name) = prop_name {
+            // ── `Enum::CASE->value` / `Enum::CASE->name` ────────
+            if let Expression::Access(Access::ClassConstant(cca)) = obj
+                && let ClassLikeConstantSelector::Identifier(case) = &cca.constant
+                && let Some(enum_name) = crate::class_lookup::class_expression_name(
+                    cca.class,
+                    ctx.current_class,
+                    class_loader,
+                )
+                && let Some(enum_cls) = class_loader(&enum_name)
+                && let Some(literal) =
+                    crate::type_engine::call_resolution::enum_case_property_literal(
+                        &enum_cls,
+                        bytes_to_str(case.value),
+                        &prop_name,
+                    )
+            {
+                return vec![ResolvedType::from_type_string(literal)];
+            }
+
             // ── $this->prop assignment narrowing ────────────────
             // When the object is `$this`, check if there is an
             // assignment to `$this->propName` before the cursor in
@@ -534,6 +546,36 @@ pub(super) fn resolve_rhs_property_access(
         }
     }
     vec![]
+}
+
+/// The type of `$value::class` given the types `$value` holds:
+/// `class-string<T>` for each object type `T`, and a bare `class-string`
+/// for `object` or an object shape, whose class is unknown.
+///
+/// A non-object member (`null`, a scalar) throws at runtime rather than
+/// producing a class name, so it contributes nothing.
+fn class_fetch_on_value(held: &[ResolvedType]) -> Vec<ResolvedType> {
+    let mut members: Vec<PhpType> = Vec::new();
+    for rt in held {
+        for member in rt.type_string.union_members() {
+            let member = member.non_null_type().unwrap_or_else(|| member.clone());
+            if !member.is_object_like() {
+                continue;
+            }
+            let fetched = if member.is_object() || member.is_object_shape() {
+                PhpType::class_string(None)
+            } else {
+                PhpType::class_string(Some(member))
+            };
+            if !members.contains(&fetched) {
+                members.push(fetched);
+            }
+        }
+    }
+    if members.is_empty() {
+        return vec![];
+    }
+    vec![ResolvedType::from_type_string(PhpType::union(members))]
 }
 
 /// Try to resolve `$this->propName` from a prior assignment in the

@@ -616,6 +616,29 @@ fn strip_docblock_line_delimiters(trimmed: &str) -> &str {
     inner.trim().trim_start_matches('*').trim()
 }
 
+/// The text after `@tag` at the start of `inner`, in any of the tag's
+/// spellings: plain (`@var`) or vendor-prefixed (`@phpstan-var`,
+/// `@psalm-var`).
+///
+/// The tag has to end there, so `@var` does not match `@variadic`.
+fn strip_tag_prefix<'a>(inner: &'a str, tag: &str) -> Option<&'a str> {
+    let rest = inner.strip_prefix('@')?;
+    let rest = rest
+        .strip_prefix("phpstan-")
+        .or_else(|| rest.strip_prefix("psalm-"))
+        .unwrap_or(rest);
+    let rest = rest.strip_prefix(tag)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest)
+}
+
+/// The byte offset and length of the first `@var` tag in `line`, in any of
+/// its spellings (`@var`, `@phpstan-var`, `@psalm-var`).
+pub(crate) fn find_var_tag(line: &str) -> Option<(usize, usize)> {
+    ["@phpstan-var", "@psalm-var", "@var"]
+        .iter()
+        .find_map(|tag| line.find(tag).map(|pos| (pos, tag.len())))
+}
+
 /// Pull the inner text out of a `/** ... */` docblock that shares its
 /// line with code on either side, e.g.
 /// `$x = /** @param T $y */ static function (T $y) {`.
@@ -704,14 +727,15 @@ pub fn find_var_raw_type_in_source(
             continue;
         }
 
-        // Quick reject: must mention both `@var` and the variable.
-        if !trimmed.contains("@var") || !trimmed.contains(var_name) {
+        // Quick reject: must mention both the tag (every spelling of
+        // which ends in `var`) and the variable.
+        if !trimmed.contains("var") || !trimmed.contains(var_name) {
             continue;
         }
 
         let inner = strip_docblock_line_delimiters(trimmed);
 
-        if let Some(rest) = inner.strip_prefix("@var") {
+        if let Some(rest) = strip_tag_prefix(inner, "var") {
             let rest = rest.trim_start();
             if rest.is_empty() {
                 continue;
@@ -1278,9 +1302,8 @@ pub fn find_iterable_raw_type_in_source(
             }
 
             if let Some(tail) = pending_continuation.take() {
-                let rest = inner
-                    .strip_prefix("@var")
-                    .or_else(|| inner.strip_prefix("@param"));
+                let rest =
+                    strip_tag_prefix(inner, "var").or_else(|| strip_tag_prefix(inner, "param"));
                 if let Some(rest) = rest {
                     let rest = rest.trim_start();
                     if !rest.is_empty() {
@@ -1321,11 +1344,7 @@ pub fn find_iterable_raw_type_in_source(
             };
 
             // Try @var first, then @param.
-            let rest = if let Some(r) = inner.strip_prefix("@var") {
-                Some(r)
-            } else {
-                inner.strip_prefix("@param")
-            };
+            let rest = strip_tag_prefix(inner, "var").or_else(|| strip_tag_prefix(inner, "param"));
 
             if let Some(rest) = rest {
                 let rest = rest.trim_start();
@@ -1351,7 +1370,7 @@ pub fn find_iterable_raw_type_in_source(
         //   $thing = [];
         //   $thing[0]->
         if is_comment_line
-            && trimmed.contains("@var")
+            && trimmed.contains("var")
             && let Some(next_line) = prev_non_empty_line
             && next_line.contains(var_name)
         {
@@ -1363,7 +1382,7 @@ pub fn find_iterable_raw_type_in_source(
             {
                 let inner = strip_docblock_line_delimiters(trimmed);
 
-                if let Some(rest) = inner.strip_prefix("@var") {
+                if let Some(rest) = strip_tag_prefix(inner, "var") {
                     let rest = rest.trim_start();
                     if !rest.is_empty() {
                         let (type_token, remainder) = split_type_token(rest);

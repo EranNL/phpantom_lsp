@@ -826,7 +826,7 @@ joins back into the enum when every case is present. Narrowing by `===`
 and `instanceof` then subtracts cases the way it subtracts union members,
 and a branch that has compared away every case holds `never`.
 
-Found porting PHPStan's `Rules/Comparison/data/bug-8485.php`; both its
+Found porting PHPStan's `Rules/Comparison/data/bug-8485.php` and `Rules/Methods/data/return-type-class-constant.php`; both its
 case and its `never` assertion are `// SKIP` in the ported copy under
 `tests/phpstan_data/`.
 

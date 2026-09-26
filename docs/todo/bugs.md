@@ -55,19 +55,6 @@ function f(B $b) { $b->table; } // should be A|string, is B|string
 
 Found porting PHPStan's `Rules/Properties/data/bug-7839.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
-### B438. An inline `@phpstan-var` above an assignment is ignored
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @phpstan-var array<Foo> $res */
-$res = [];
-$res; // should be array<Foo>, is array{}
-```
-
-The same annotation spelled `@var` works. The inline-`@var` readers the forward walker and the backward docblock scans use (`parse_var_docblock_pairs`, `parse_inline_var_docblock_no_var` and the line scanners in `docblock/tags.rs`) each match the literal text `@var`, so the vendor-prefixed `@phpstan-var` and `@psalm-var` never match. The mago-based `extract_var_type_with_name` already reads the vendor spellings first; moving those scanners onto it fixes all of them at once.
-
-Found porting PHPStan's `Rules/Methods/data/bug-7511.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
 ### B439. `@mixin` on a trait is not applied to the class that uses it
 **Impact: Low-Medium · Complexity: Medium**
 
@@ -99,35 +86,6 @@ $y; // should be string|null, is null
 `extract()` writes one local per key of its array argument. With a shape argument the keys are known, so a required key defines (or overwrites) its variable and an optional one may. Other arguments leave every variable possibly overwritten with anything.
 
 Found porting PHPStan's `Rules/Variables/data/bug-12364.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B441. A class constant whose initializer names an enum case is not resolved
-**Impact: Low · Complexity: Medium**
-
-```php
-enum E { const FOO = E::A; case A; }
-E::FOO; // should be E, resolves to nothing
-
-enum A: string { case X = 'x'; case Y = 'y'; }
-class B { public const A = [A::X->value, A::Y->value]; }
-B::A; // should be array{'x', 'y'}, is array
-```
-
-Constant folding stops at an enum case in the initializer, whether the case is the value itself or the case's `->value`. A typed constant declared `const static FOO = Foo::A` inside the enum reads back as `static` for the same reason.
-
-Found porting PHPStan's `Rules/Methods/data/return-type-class-constant.php` and `Rules/Constants/data/bug-8957.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B442. `$value::class` resolves to nothing
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-function f(Foo $o) {
-    $o::class; // should be class-string<Foo>, resolves to nothing
-}
-```
-
-`Foo::class` resolves to `class-string<Foo>`, but the same fetch on an expression (allowed since PHP 8.0) has no type at all. It should be `class-string<T>` for whatever `T` the expression holds, and plain `class-string` for an `object`.
-
-Found porting PHPStan's `Rules/Functions/data/bug-7823.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
 
 ### B443. A closure parameter is not inferred from a `callable(static)` type alias declared on a trait
 **Impact: Low · Complexity: Medium**
@@ -229,7 +187,7 @@ function f($items) {
 
 An unbounded method template, and a class template, keep their name inside the body (`T`); a method template with a bound is replaced by the bound when the parameter is seeded. The bound is the right thing for completion, but the value is still `T`, and returning it should keep the template (a method template bounded by a class template shows the class template's name instead).
 
-Found porting PHPStan's `Rules/Methods/data/bug-7511.php`, `Rules/Methods/data/bug-5562.php`, `Rules/Generics/data/bug-3769.php` and `Rules/PhpDoc/data/bug-4643.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
+Found porting PHPStan's `Rules/Methods/data/bug-7511.php`, `Rules/Methods/data/bug-5562.php`, `Rules/Generics/data/bug-3769.php`, `Rules/PhpDoc/data/bug-4643.php` and `Rules/Functions/data/bug-7823.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
 ### B464. Template inference from a literal argument widens it
 **Impact: Low · Complexity: Medium**

@@ -66,7 +66,9 @@ pub use tags::{
     has_deprecated_tag, has_deprecated_tag_from_info, resolve_effective_type_typed,
     sanitise_and_parse_docblock_type, should_override_type_typed,
 };
-pub(crate) use tags::{is_compatible_refinement_typed, merge_param_docblock_into_parameters};
+pub(crate) use tags::{
+    find_var_tag, is_compatible_refinement_typed, merge_param_docblock_into_parameters,
+};
 
 // Template / generics / type alias tags
 pub use templates::{

@@ -819,8 +819,9 @@ impl Backend {
 
         // ClassName::Member — enum cases and class constants.
         // Enum cases resolve to the enum type; class constants
-        // resolve to the constant's declared type hint.
-        if !has_arrow_chain && let Some(ty) = resolve_static_access_type(trimmed, ctx) {
+        // resolve to the constant's declared type hint.  Of the `->`
+        // chains, it answers only a case's `->name` / `->value`.
+        if let Some(ty) = resolve_static_access_type(trimmed, ctx) {
             return Some(ty);
         }
 

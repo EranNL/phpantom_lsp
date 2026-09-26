@@ -25,7 +25,7 @@ abstract class HelloWorld
 		/** @phpstan-var array<T> $res */
 		$res = [];
 
-		assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $res[1]); // SKIP: an inline @phpstan-var above an assignment is ignored (plain @var works)
+		assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $res[1]);
 
 		foreach ($tgs as $tgItem) {
 			$position = $tgItem->getPosition();
@@ -62,17 +62,17 @@ abstract class HelloWorld
 		/** @phpstan-var array<T> $res */
 		$res = [];
 
-		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)>', $res); // SKIP: an inline @phpstan-var above an assignment is ignored (plain @var works)
+		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)>', $res);
 
 		foreach ($tgs as $tgItem) {
 			$position = $tgItem->getPosition();
 
-			assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)', $res[$position]); // SKIP: an inline @phpstan-var above an assignment is ignored (plain @var works)
+			assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)', $res[$position]);
 			if (isset($res[$position])) {
-				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)', $res[$position]); // SKIP: an inline @phpstan-var above an assignment is ignored (plain @var works)
+				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)', $res[$position]);
 			}
 		}
-		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)>', $res); // SKIP: an inline @phpstan-var above an assignment is ignored (plain @var works)
+		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition2(), parameter)>', $res);
 
 		return $res;
 	}

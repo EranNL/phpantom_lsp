@@ -106,14 +106,11 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B437 | [`self` in an inherited property's docblock names the class it is read through](todo/bugs.md#b437-self-in-an-inherited-propertys-docblock-names-the-class-it-is-read-through) | Medium | Medium |
-| B438 | [An inline `@phpstan-var` above an assignment is ignored](todo/bugs.md#b438-an-inline-phpstan-var-above-an-assignment-is-ignored) | Medium | Medium |
-| B442 | [`$value::class` resolves to nothing](todo/bugs.md#b442-valueclass-resolves-to-nothing) | Low-Medium | Low |
 | B439 | [`@mixin` on a trait is not applied to the class that uses it](todo/bugs.md#b439-mixin-on-a-trait-is-not-applied-to-the-class-that-uses-it) | Low-Medium | Medium |
 | B456 | [Writes through a list's own keys drop `list`, while `unset()` of an element keeps it](todo/bugs.md#b456-writes-through-a-lists-own-keys-drop-list-while-unset-of-an-element-keeps-it) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
 | B482 | [`__PROPERTY__` inside a property hook resolves to its base type rather than its value](todo/bugs.md#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value) | Low | Low |
 | B440 | [`extract()` defines no variables](todo/bugs.md#b440-extract-defines-no-variables) | Low | Medium |
-| B441 | [A class constant whose initializer names an enum case is not resolved](todo/bugs.md#b441-a-class-constant-whose-initializer-names-an-enum-case-is-not-resolved) | Low | Medium |
 | B443 | [A closure parameter is not inferred from a `callable(static)` type alias declared on a trait](todo/bugs.md#b443-a-closure-parameter-is-not-inferred-from-a-callablestatic-type-alias-declared-on-a-trait) | Low | Medium |
 | B460 | [Array shape unions are merged differently from PHPStan](todo/bugs.md#b460-array-shape-unions-are-merged-differently-from-phpstan) | Low | Medium |
 | B483 | [Appending a literal to a declared array widens it to its base type](todo/bugs.md#b483-appending-a-literal-to-a-declared-array-widens-it-to-its-base-type) | Low | Low-Medium |

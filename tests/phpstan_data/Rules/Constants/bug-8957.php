@@ -18,6 +18,7 @@ class B {
 
 	public function doFoo(): void
 	{
-		assertType('array{\'x\', \'y\'}', self::A); // SKIP: a class constant whose initializer names an enum case is not resolved
+		// Upstream prints the same list as `array{'x', 'y'}`.
+		assertType('list{\'x\', \'y\'}', self::A);
 	}
 }

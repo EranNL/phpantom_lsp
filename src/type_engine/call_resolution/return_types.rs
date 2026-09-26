@@ -936,8 +936,13 @@ pub(super) fn resolve_chain_declared_return(
 ///
 /// Handles enum cases (`MyEnum::Case` → `MyEnum`) and class constants
 /// (`Foo::BAR` → the constant's type hint, or the type inferred from
-/// the constant's initializer value for untyped constants).
+/// the constant's initializer value for untyped constants).  Of the
+/// expressions that continue past the member with `->`, only a case's
+/// `->value` / `->name` is answered.
 pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    if text.contains("->") {
+        return resolve_enum_case_property_text(text, ctx);
+    }
     let (class_part, _member) = text.split_once("::")?;
 
     // Only accept identifier-like class names (no `$var::`, no whitespace).
@@ -961,8 +966,15 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
 
     let cls = (ctx.class_loader)(&class_name)?;
 
-    // Enums: any `EnumName::Case` resolves to the enum type itself.
-    if cls.kind == ClassLikeKind::Enum {
+    // Enum cases resolve to the enum type itself.  A constant declared on
+    // the enum is read like any other class constant below.
+    if cls.kind == ClassLikeKind::Enum
+        && cls
+            .constants
+            .iter()
+            .find(|c| c.name == _member)
+            .is_none_or(|c| c.is_enum_case)
+    {
         return Some(PhpType::named(cls.fqn()));
     }
 
@@ -973,62 +985,113 @@ pub(crate) fn resolve_static_access_type(text: &str, ctx: &ResolutionCtx<'_>) ->
         ctx.class_loader,
         ctx.resolved_class_cache,
     );
-    if let Some(constant) = merged.constants.iter().find(|c| c.name == _member) {
-        // Infer the value type from the initializer so template params bind
-        // to the constant's value (e.g. `int`) rather than the owning class.
-        //
-        // A declared type (PHP 8.3's `const int NAME = …`) says what the
-        // constant may hold, not what it does hold, so the initialiser is
-        // still the sharper answer and is read first. It only stands in for
-        // the declaration when it refines it: an initialiser naming an enum
-        // case resolves to the case's class, which the structural check
-        // rejects, leaving the declared type as before.
-        if let Some(ref val) = constant.value {
-            let resolve = |text: &str| {
-                Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, &merged), ctx)
-            };
-            let inferred =
-                crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(
-                    val, &resolve,
-                )
-                .or_else(|| folded_class_constant_type(&merged, _member, val, ctx));
-            if let Some(ty) = inferred.filter(|ty| {
-                constant
-                    .type_hint
-                    .as_ref()
-                    .is_none_or(|hint| ty.is_subtype_of(hint))
-            }) {
-                return Some(ty);
-            }
-        }
-        if let Some(ref hint) = constant.type_hint {
-            return Some(hint.clone());
-        }
+    class_constant_type(&merged, _member, ctx)
+}
 
-        // An untyped constant whose initialiser is itself `Class::Case`
-        // holds that case's own enum type — the structural check above
-        // deliberately skips it (an enum case is not a `Literal`), and
-        // there is no declared type hint to fall back to here. Recurse
-        // into this same function on the initialiser text rather than
-        // teaching it a second way to read an enum case; guarded by the
-        // same re-entrancy key `folded_class_constant_type` folds under,
-        // so a constant defined in terms of itself (directly or through
-        // another constant) reports unresolvable instead of recursing
-        // forever.
-        if let Some(ref val) = constant.value {
-            let key = format!("{}::{}", merged.fqn(), _member);
-            let _guard = crate::type_engine::types::const_fold::FoldGuard::acquire(&key)?;
-            let qualified = qualify_class_keyword(val, &merged);
-            if let Some(ty) = resolve_static_access_type(&qualified, ctx) {
-                return Some(ty);
-            }
+/// The literal a `->name` or `->value` read on a named enum case holds:
+/// the case's own name, or the value it is backed by.
+///
+/// `None` when `enum_cls` is not an enum, `case` is not one of its cases,
+/// or `property` is neither of the two.
+pub(crate) fn enum_case_property_literal(
+    enum_cls: &ClassInfo,
+    case: &str,
+    property: &str,
+) -> Option<PhpType> {
+    if enum_cls.kind != ClassLikeKind::Enum {
+        return None;
+    }
+    let constant = enum_cls
+        .constants
+        .iter()
+        .find(|c| c.is_enum_case && c.name == case)?;
+    match property {
+        "name" => Some(PhpType::literal_string_raw(format!("'{case}'"))),
+        "value" => crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+            constant.enum_value.as_deref()?,
+        ),
+        _ => None,
+    }
+}
+
+/// [`enum_case_property_literal`] for an expression given as text,
+/// `Enum::CASE->value` or `Enum::CASE->name`.
+fn resolve_enum_case_property_text(text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let is_name = |s: &str| {
+        !s.is_empty()
+            && s.chars()
+                .all(|c| c.is_alphanumeric() || c == '_' || c == '\\')
+    };
+    let (object, property) = text.split_once("->")?;
+    let (class_part, case) = object.split_once("::")?;
+    if !is_name(class_part) || !is_name(case) || !is_name(property) {
+        return None;
+    }
+    let class_name = if is_self_or_static(class_part) {
+        ctx.current_class?.name.to_string()
+    } else {
+        resolve_class_keyword(class_part, ctx.current_class)
+            .unwrap_or_else(|| class_part.to_string())
+    };
+    let cls = (ctx.class_loader)(&class_name)?;
+    enum_case_property_literal(&cls, case, property)
+}
+
+/// The type a class constant holds, read from its initializer where that
+/// can be folded and from its declared type otherwise.
+///
+/// `merged` is the class the constant is looked up on, with inherited
+/// members merged in.
+pub(crate) fn class_constant_type(
+    merged: &ClassInfo,
+    member: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let constant = merged.constants.iter().find(|c| c.name == member)?;
+    // Infer the value type from the initializer so template params bind
+    // to the constant's value (e.g. `int`) rather than the owning class.
+    //
+    // A declared type (PHP 8.3's `const int NAME = …`) says what the
+    // constant may hold, not what it does hold, so the initialiser is
+    // still the sharper answer and is read first. It only stands in for
+    // the declaration when it refines it.
+    //
+    // Reading the initialiser can come back here (`const A = [self::A];`,
+    // or two constants naming each other), so the whole read is claimed
+    // under a key of its own; `folded_class_constant_type` claims the
+    // plain `Class::NAME` one for its own fold.
+    if let Some(ref val) = constant.value
+        && let Some(_guard) = crate::type_engine::types::const_fold::FoldGuard::acquire(&format!(
+            "{}::{} initializer",
+            merged.fqn(),
+            member
+        ))
+    {
+        let resolve = |text: &str| {
+            Backend::resolve_arg_text_to_type(&qualify_class_keyword(text, merged), ctx)
+        };
+        let inferred =
+            crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value_resolved(
+                val, &resolve,
+            )
+            .or_else(|| folded_class_constant_type(merged, member, val, ctx))
+            // An initialiser that is itself `Class::Case` holds that case's
+            // own enum type, which the folding above skips (an enum case is
+            // not a literal).
+            .or_else(|| resolve_static_access_type(&qualify_class_keyword(val, merged), ctx));
+        // The initialiser is one fixed value whichever class the constant
+        // is read through, so a declared `static` (legal on an enum's
+        // constant) is checked as the class it is declared on.
+        if let Some(ty) = inferred.filter(|ty| {
+            constant
+                .type_hint
+                .as_ref()
+                .is_none_or(|hint| ty.is_subtype_of(&hint.replace_self_bound(&merged.fqn(), None)))
+        }) {
+            return Some(ty);
         }
     }
-
-    // Unknown member or untyped constant we can't classify — we can't
-    // determine the type, so return None and let the caller skip the
-    // diagnostic.
-    None
+    constant.type_hint.clone()
 }
 
 /// The literal value an untyped class constant holds, folded from an

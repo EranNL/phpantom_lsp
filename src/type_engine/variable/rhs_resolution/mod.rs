@@ -1698,8 +1698,9 @@ fn is_object_cast_scalar_type(ty: &PhpType) -> bool {
 /// [`crate::Backend::resolve_arg_text_to_type`] provides.
 pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
-/// The literal `class-string` a `Foo::class` array element resolves to,
-/// e.g. `'Foo'` for `Foo::class`.
+/// The literal an array element that names something resolves to: `'Foo'`
+/// for `Foo::class`, or the value a constant or an enum case's `->value`
+/// holds.
 ///
 /// A shape entry has to be a [`TypeKind::Literal`] to mean anything (a
 /// non-literal element falls back to plain `array`, see
@@ -1707,8 +1708,18 @@ pub(crate) type TextResolver<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 /// down to the class name it names, matching how PHPStan reads a `::class`
 /// array element: as the literal string, not the wrapper type a bare
 /// `Foo::class` expression resolves to on its own.
-fn class_const_fetch_as_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
-    class_const_fetch_name(value, resolve).map(|name| PhpType::literal_string_value(&name))
+fn resolved_element_literal(value: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let ty = resolve(value)?;
+    match ty.kind() {
+        TypeKind::ClassString(Some(inner)) => match inner.kind() {
+            TypeKind::Named(name) => {
+                Some(PhpType::literal_string_value(name.trim_start_matches('\\')))
+            }
+            _ => None,
+        },
+        TypeKind::Literal(_) => Some(ty),
+        _ => None,
+    }
 }
 
 /// The class name a `Foo::class` expression names, resolved against the
@@ -1771,7 +1782,7 @@ fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option
             None => (None, item),
         };
         let value_type = infer_type_from_constant_value_inner(value, resolve)
-            .or_else(|| resolve.and_then(|resolve| class_const_fetch_as_literal(value, resolve)))?;
+            .or_else(|| resolve.and_then(|resolve| resolved_element_literal(value, resolve)))?;
         entries.push(ShapeEntry {
             key,
             value_type,
