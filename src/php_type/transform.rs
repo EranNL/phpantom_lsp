@@ -540,6 +540,14 @@ impl PhpType {
         self.replace_self_inner(replacement, LsbBinding::Inherit)
     }
 
+    /// Like [`replace_self_with_type`](Self::replace_self_with_type), but for
+    /// a call whose target class is statically fixed, so `static` / `$this`
+    /// collapse to `replacement` instead of staying bounded over it.  See
+    /// [`replace_self_bound`](Self::replace_self_bound) for when that holds.
+    pub fn replace_self_fixed(&self, replacement: &PhpType) -> PhpType {
+        self.replace_self_inner(replacement, LsbBinding::Fixed)
+    }
+
     /// Replace `self` / `static` / `$this` throughout this type tree, with
     /// explicit control over what the late-static-binding keywords bind to.
     ///

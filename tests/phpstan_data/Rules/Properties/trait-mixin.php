@@ -37,9 +37,9 @@ class ChildUsages extends Usages
 }
 
 function (Usages $u): void {
-	assertType(Usages::class, $u->a); // SKIP: @mixin on a trait is not applied to the class that uses it
+	assertType(Usages::class, $u->a);
 };
 
 function (ChildUsages $u): void {
-	assertType(ChildUsages::class, $u->a); // SKIP: @mixin on a trait is not applied to the class that uses it
+	assertType(ChildUsages::class, $u->a);
 };

@@ -42,69 +42,20 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B437. `self` in an inherited property's docblock names the class it is read through
-**Impact: Medium · Complexity: Medium**
-
-```php
-class A { /** @var string|self */ public $table; }
-class B extends A {}
-function f(B $b) { $b->table; } // should be A|string, is B|string
-```
-
-`self` is lexical: in a docblock it names the class the docblock is written in, wherever the member is inherited to. Reading an inherited property through a subclass rebinds it to that subclass, as if it were `static`. A subclass that redeclares the property without a type (`public $table = 'a';`) should inherit the parent's docblock type too.
-
-Found porting PHPStan's `Rules/Properties/data/bug-7839.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B439. `@mixin` on a trait is not applied to the class that uses it
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T */
-interface Foo { /** @return T */ public function get(); }
-/** @mixin Foo<static> */
-trait FooTrait {}
-class Usages { use FooTrait; }
-function f(Usages $u) { $u->get(); } // should be Usages, resolves to nothing
-```
-
-A `@mixin` tag is read off the class it is declared on, but not off the traits a class uses, so the mixin's members never reach the using class. Once they do, `static` in the mixin's generic argument has to bind to the class the member is reached through (`ChildUsages` for a subclass).
-
-Found porting PHPStan's `Rules/Methods/data/trait-mixin.php`, `Rules/Properties/data/trait-mixin.php` and `Rules/Classes/data/mixin-trait-use.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
-### B440. `extract()` defines no variables
+### B484. `extract()` with flags or a non-shape array leaves the locals untouched
 **Impact: Low · Complexity: Medium**
 
 ```php
-/** @return array{x: string, y?: string} */
-function foo(): array { return ['x' => 'foo']; }
-$x = $y = null;
-extract(foo());
-$x; // should be string, is null
-$y; // should be string|null, is null
-```
-
-`extract()` writes one local per key of its array argument. With a shape argument the keys are known, so a required key defines (or overwrites) its variable and an optional one may. Other arguments leave every variable possibly overwritten with anything.
-
-Found porting PHPStan's `Rules/Variables/data/bug-12364.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B443. A closure parameter is not inferred from a `callable(static)` type alias declared on a trait
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @phpstan-type SettingsFactory callable(static): array<string,mixed> */
-trait WithConfig {
-    /** @param SettingsFactory $settings */
-    public function setConfig(callable $settings): void {}
+function f(array $data) {
+    $x = 1;
+    extract($data);
+    $x; // should be mixed, is 1
+    extract(['y' => 's'], EXTR_PREFIX_ALL, 'p');
+    $p_y; // should be 's', resolves to nothing
 }
-class A { use WithConfig; }
-function (A $a) {
-    $a->setConfig(function ($who) { $who; }); // should be A, resolves to nothing
-};
 ```
 
-The same `callable(static)` written inline in the `@param` works (the ported file's `@method` and property variants pass). Through the alias, the closure gets no parameter type: either the alias is not expanded where callable parameter inference reads the signature, or `static` inside it is not bound to the using class.
-
-Found porting PHPStan's `Rules/Classes/data/bug-11591.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
+Only a single-argument `extract()` of an array shape defines its keys. An argument whose keys are not known may overwrite any local with anything, so every variable in scope should widen to `mixed` after the call (PHPStan's `afterExtractCall()`). An explicit flags argument changes which keys are written (`EXTR_SKIP`, `EXTR_IF_EXISTS`) and under what names (`EXTR_PREFIX_*`), and is not modelled at all.
 
 ## Array types
 

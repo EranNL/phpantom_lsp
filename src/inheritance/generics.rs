@@ -128,6 +128,39 @@ pub(crate) fn bind_inherited_class_keywords(
     }
 }
 
+/// Whether an inheritance merge would rewrite a relative class keyword in
+/// `property`'s type: bare `self`, or bare `parent` when the declaring
+/// class's own parent is known.
+pub(crate) fn property_has_inherited_class_keyword(
+    property: &PropertyInfo,
+    declaring_parent: Option<&str>,
+) -> bool {
+    property.type_hint.as_ref().is_some_and(|h| {
+        h.contains_bare_self() || (declaring_parent.is_some() && h.contains_bare_parent())
+    })
+}
+
+/// Bind the relative class keywords in an inherited property's type to the
+/// classes the declaration meant, like [`bind_inherited_class_keywords`]
+/// does for a method.
+pub(crate) fn bind_inherited_class_keywords_in_property(
+    property: &mut PropertyInfo,
+    class_name: &str,
+    declaring_parent: Option<&str>,
+) {
+    let Some(ref mut hint) = property.type_hint else {
+        return;
+    };
+    if hint.contains_bare_self() {
+        *hint = hint.replace_bare_self(class_name);
+    }
+    if let Some(declaring_parent) = declaring_parent
+        && hint.contains_bare_parent()
+    {
+        *hint = hint.replace_bare_parent(declaring_parent);
+    }
+}
+
 /// Replace bare `self` in a method's return type and parameter hints
 /// with `class_name`.
 ///

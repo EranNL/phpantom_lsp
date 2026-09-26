@@ -249,6 +249,10 @@ impl VirtualMemberProvider for PHPDocProvider {
             }
         }
 
+        if uses_trait_with_mixins(class, class_loader) {
+            return true;
+        }
+
         // Walk the parent chain to check for ancestor mixins or tags.
         let mut current_parent = class.parent_class;
         let mut depth = 0u32;
@@ -262,7 +266,10 @@ impl VirtualMemberProvider for PHPDocProvider {
             } else {
                 break;
             };
-            if !parent.mixins.is_empty() || parent.doc_members.is_some() {
+            if !parent.mixins.is_empty()
+                || parent.doc_members.is_some()
+                || uses_trait_with_mixins(&parent, class_loader)
+            {
                 return true;
             }
             // `provide` also reads tags off the traits an ancestor uses.
@@ -564,6 +571,14 @@ impl VirtualMemberProvider for PHPDocProvider {
             0,
             cache,
         );
+        collect_trait_mixin_members(
+            class,
+            &HashMap::new(),
+            class_loader,
+            &mut collector,
+            decorated_forward,
+            cache,
+        );
 
         // Collect from ancestor mixins.
         //
@@ -630,6 +645,14 @@ impl VirtualMemberProvider for PHPDocProvider {
                     cache,
                 );
             }
+            collect_trait_mixin_members(
+                &parent,
+                &level_subs,
+                class_loader,
+                &mut collector,
+                decorated_forward,
+                cache,
+            );
             active_subs = level_subs;
             current_ancestor = ClassRef::Owned(parent);
         }
@@ -639,6 +662,105 @@ impl VirtualMemberProvider for PHPDocProvider {
             properties: collector.properties,
             constants: collector.constants,
         }
+    }
+}
+
+/// Whether `class` uses a trait (directly or through a trait it uses)
+/// that declares `@mixin`.
+fn uses_trait_with_mixins(
+    class: &ClassInfo,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> bool {
+    let mut queue: Vec<Atom> = class.used_traits.to_vec();
+    let mut visited = AtomSet::default();
+    while let Some(trait_name) = queue.pop() {
+        if !visited.insert(trait_name) {
+            continue;
+        }
+        let Some(trait_info) = class_loader(&trait_name) else {
+            continue;
+        };
+        if !trait_info.mixins.is_empty() {
+            return true;
+        }
+        queue.extend(trait_info.used_traits.iter().copied());
+    }
+    false
+}
+
+/// Collect the members of the `@mixin` classes declared on the traits
+/// `owner` uses, and on the traits those traits use.
+///
+/// A trait's docblock describes the class that uses it, so its mixins
+/// apply to that class like the class's own.  `owner_subs` binds
+/// `owner`'s template parameters (non-empty when `owner` is an ancestor
+/// reached through `@extends`); each trait's `@use Trait<…>` arguments
+/// are layered on top of it.
+fn collect_trait_mixin_members(
+    owner: &ClassInfo,
+    owner_subs: &HashMap<String, PhpType>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    collector: &mut MixinCollector,
+    decorated_forward: bool,
+    cache: Option<&super::ResolvedClassCache>,
+) {
+    if owner.used_traits.is_empty() {
+        return;
+    }
+    let mut queue: Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)> = Vec::new();
+    let mut visited = AtomSet::default();
+    let mut enqueue =
+        |consumer: &ClassInfo,
+         subs: &HashMap<String, PhpType>,
+         queue: &mut Vec<(Arc<ClassInfo>, HashMap<String, PhpType>)>| {
+            for trait_name in &consumer.used_traits {
+                if !visited.insert(*trait_name) {
+                    continue;
+                }
+                if let Some(trait_info) = class_loader(trait_name) {
+                    let trait_subs =
+                        build_trait_substitution_map(consumer, &trait_info, trait_name, subs);
+                    queue.push((trait_info, trait_subs));
+                }
+            }
+        };
+    enqueue(owner, owner_subs, &mut queue);
+    // Walk in declaration order so an earlier `use` wins a name clash.
+    queue.reverse();
+    while let Some((trait_info, trait_subs)) = queue.pop() {
+        if !trait_info.mixins.is_empty() {
+            let mixin_generics: Vec<(Atom, Vec<PhpType>)> = if trait_subs.is_empty() {
+                trait_info.mixin_generics.clone()
+            } else {
+                trait_info
+                    .mixin_generics
+                    .iter()
+                    .map(|(name, args)| {
+                        (
+                            *name,
+                            args.iter().map(|a| a.substitute(&trait_subs)).collect(),
+                        )
+                    })
+                    .collect()
+            };
+            collect_mixin_members(
+                &trait_info.mixins,
+                &mixin_generics,
+                class_loader,
+                collector,
+                &MixinSubs {
+                    subs: &trait_subs,
+                    bounds: &trait_info.template_param_bounds,
+                    decorated_forward,
+                },
+                0,
+                cache,
+            );
+        }
+        let mut nested = Vec::new();
+        enqueue(&trait_info, &trait_subs, &mut nested);
+        nested.reverse();
+        queue.extend(nested);
     }
 }
 

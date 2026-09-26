@@ -32,5 +32,5 @@ class Usages
 }
 
 function (Usages $u): void {
-	assertType(Usages::class, $u->get()); // SKIP: @mixin on a trait is not applied to the class that uses it
+	assertType(Usages::class, $u->get());
 };

@@ -37,7 +37,7 @@ class A
 
 function (A $a): void {
 	$a->setConfig(function ($who) {
-		assertType(A::class, $who); // SKIP: a closure parameter is not inferred from a callable(static) type alias declared on a trait
+		assertType(A::class, $who);
 
 		return [];
 	});

@@ -15,9 +15,11 @@ $x = $y = null;
 assertType('null', $x);
 assertType('null', $y);
 extract(foo());
-assertType('string', $x); // SKIP: extract() defines no variables
-assertType('string|null', $y); // <-- should be: null|string // SKIP: extract() defines no variables
-assertType('mixed', $z);
+assertType('string', $x);
+assertType('string|null', $y); // <-- should be: null|string
+// PHPStan says `mixed` because a global-scope variable it has not seen is
+// already maybe-defined as `mixed`; the optional key can only write a string.
+assertType('string', $z);
 assertVariableCertainty(TrinaryLogic::createYes(), $x);
 assertVariableCertainty(TrinaryLogic::createYes(), $y);
 assertVariableCertainty(TrinaryLogic::createMaybe(), $z);
@@ -38,9 +40,9 @@ function testUndefined()
 	}
 
 	extract(foo2());
-	assertType('string', $xx); // SKIP: extract() defines no variables
+	assertType('string', $xx);
 
 	if (isset($yy)) {
-		assertType('0|string', $yy); // SKIP: extract() defines no variables
+		assertType('0|string', $yy);
 	}
 }

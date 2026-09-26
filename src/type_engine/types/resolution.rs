@@ -746,6 +746,59 @@ pub(crate) fn expand_nested_type_aliases(
     (expanded != *ty).then_some(expanded)
 }
 
+/// [`expand_nested_type_aliases`] for a type read off a member of `class`,
+/// which may be declared in another file.
+///
+/// The file-scoped lookup only sees the classes of the file being
+/// analysed, but a member signature names the aliases of the class that
+/// declares it. An inherited or trait-imported member no longer records
+/// that class, so a bare alias name the file cannot resolve is looked up
+/// on `class`, the traits it uses and its ancestors, nearest first.
+pub(crate) fn expand_member_type_aliases(
+    ty: &PhpType,
+    class: &ClassInfo,
+    all_classes: &[Arc<ClassInfo>],
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<PhpType> {
+    if let Some(expanded) = expand_nested_type_aliases(ty, &class.name, all_classes, class_loader) {
+        return Some(expanded);
+    }
+    let TypeKind::Named(name) = ty.kind() else {
+        return None;
+    };
+    if is_builtin_non_class_type(name) {
+        return None;
+    }
+    let name = atom(name);
+    let mut queue: Vec<Arc<ClassInfo>> = Vec::new();
+    let mut visited = crate::atom::AtomSet::default();
+    let mut loaded_current: Option<Arc<ClassInfo>> = None;
+    let mut index = 0;
+    loop {
+        let current: &ClassInfo = loaded_current.as_deref().unwrap_or(class);
+        if let Some(def) = current.type_aliases.get(&name) {
+            let expanded = expand_type_alias_def(def, all_classes, class_loader)?;
+            return Some(
+                expand_nested_type_aliases(&expanded, &current.name, all_classes, class_loader)
+                    .unwrap_or(expanded),
+            );
+        }
+        for related in current
+            .used_traits
+            .iter()
+            .chain(current.parent_class.iter())
+        {
+            if visited.insert(*related)
+                && let Some(loaded) = class_loader(related)
+            {
+                queue.push(loaded);
+            }
+        }
+        loaded_current = Some(Arc::clone(queue.get(index)?));
+        index += 1;
+    }
+}
+
 /// Single-level alias lookup (no chaining).
 fn resolve_type_alias_once(
     hint: &PhpType,

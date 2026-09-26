@@ -21,6 +21,6 @@ class C extends B
 
 function (A $a, B $b, C $c) {
 	assertType('Bug7839\\A|string', $a->table);
-	assertType('Bug7839\\A|string', $b->table); // SKIP: `self` in an inherited property's docblock names the class it is read through
-	assertType('Bug7839\\A|string', $c->table); // SKIP: `self` in an inherited property's docblock names the class it is read through
+	assertType('Bug7839\\A|string', $b->table);
+	assertType('Bug7839\\A|string', $c->table);
 };

@@ -11,7 +11,7 @@ use mago_syntax::cst::argument::Argument;
 
 use crate::atom::{atom, bytes_to_str};
 use crate::parser::with_parsed_program;
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{PhpType, ShapeEntry, TypeKind};
 use crate::type_engine::call_resolution::{
     OutParamCallee, effective_out_type, resolve_out_type_for_call,
 };
@@ -442,7 +442,9 @@ pub(crate) fn process_pass_by_ref<'b>(
         .map(|name| (*name, scope.locals.get(&atom(name)).cloned()))
         .collect();
 
-    if !super::array_assignment::process_array_push_call(expr, scope, ctx) {
+    if !super::array_assignment::process_array_push_call(expr, scope, ctx)
+        && !process_extract_call(expr, scope, ctx)
+    {
         apply_by_ref_parameter_types(expr, scope, ctx);
     }
 
@@ -453,6 +455,110 @@ pub(crate) fn process_pass_by_ref<'b>(
             None => scope.locals.remove(&key),
         };
     }
+}
+
+/// Define the locals an `extract($shape)` call writes, one per key.
+///
+/// With the default `EXTR_OVERWRITE` flag every string key that is a
+/// valid variable name becomes a local holding its value, so a required
+/// key replaces whatever the variable held and an optional one may.
+/// Returns whether the call was handled: an argument that is not a
+/// single array shape, or an explicit flags argument, is left alone.
+fn process_extract_call<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Expression::Call(Call::Function(call)) = expr else {
+        return false;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    if !bytes_to_str(ident.value())
+        .trim_start_matches('\\')
+        .eq_ignore_ascii_case("extract")
+    {
+        return false;
+    }
+    let mut args = call.argument_list.arguments.iter();
+    let (Some(Argument::Positional(arg)), None) = (args.next(), args.next()) else {
+        return false;
+    };
+    if arg.ellipsis.is_some() {
+        return false;
+    }
+    let types = super::assignment::resolve_rhs_with_scope(arg.value, scope, ctx);
+    if types.is_empty() {
+        return false;
+    }
+    let array = ResolvedType::types_joined(&types);
+    // Each alternative of a union of shapes writes its own keys, so a key
+    // the others lack is only possibly written.
+    let shapes: Vec<&[ShapeEntry]> = match array.kind() {
+        TypeKind::ArrayShape(entries) => vec![&entries[..]],
+        TypeKind::Union(members) => {
+            let shapes: Vec<&[ShapeEntry]> = members
+                .iter()
+                .filter_map(|m| match m.kind() {
+                    TypeKind::ArrayShape(entries) => Some(&entries[..]),
+                    _ => None,
+                })
+                .collect();
+            if shapes.len() != members.len() {
+                return false;
+            }
+            shapes
+        }
+        _ => return false,
+    };
+    // (name, value, optional, alternatives writing it), in key order.
+    let mut written: Vec<(&str, Vec<PhpType>, bool, usize)> = Vec::new();
+    for entries in &shapes {
+        for entry in entries.iter() {
+            let Some(key) = entry.key.as_deref() else {
+                continue;
+            };
+            let name = key.trim_matches(|c| c == '\'' || c == '"');
+            if !is_extractable_variable_name(name) {
+                continue;
+            }
+            match written.iter_mut().find(|(n, ..)| *n == name) {
+                Some((_, values, optional, count)) => {
+                    values.push(entry.value_type.clone());
+                    *optional |= entry.optional;
+                    *count += 1;
+                }
+                None => written.push((name, vec![entry.value_type.clone()], entry.optional, 1)),
+            }
+        }
+    }
+    for (name, mut values, optional, count) in written {
+        let var_name = format!("${name}");
+        if optional || count < shapes.len() {
+            let existing = scope.get(&var_name);
+            if !existing.is_empty() {
+                values.insert(0, ResolvedType::types_joined(existing));
+            }
+        }
+        scope.set(
+            &var_name,
+            vec![ResolvedType::from_type_string(PhpType::union(values))],
+        );
+    }
+    true
+}
+
+/// Whether `extract()` turns an array key into a local: a valid PHP
+/// variable name other than `this`, which it refuses to overwrite.
+fn is_extractable_variable_name(name: &str) -> bool {
+    let mut bytes = name.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    (first == b'_' || first.is_ascii_alphabetic() || first >= 0x80)
+        && bytes.all(|b| b == b'_' || b.is_ascii_alphanumeric() || b >= 0x80)
+        && name != "this"
 }
 
 /// Give the variables a call passes by reference the types its parameters
