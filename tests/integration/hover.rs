@@ -15533,6 +15533,54 @@ function outer(): void {
     );
 }
 
+/// `__PROPERTY__` (PHP 8.4) inside a property hook's `get`/`set` body
+/// resolves to the property's bare name, the way `__FUNCTION__` resolves
+/// to the enclosing function's name, not to the property's declared
+/// type. Outside any property hook it is the empty string.
+#[test]
+fn hover_magic_constant_property_inside_hooks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class User {
+    public string $name {
+        get {
+            $inGet = __PROPERTY__;
+            return $this->name;
+        }
+        set(string $value) {
+            $inSet = __PROPERTY__;
+            $this->name = $value;
+        }
+    }
+
+    public function outsideAnyHook(): void {
+        $outside = __PROPERTY__;
+    }
+}
+"#;
+    for (var, want) in [
+        ("$inGet", "'name'"),
+        ("$inSet", "'name'"),
+        ("$outside", "''"),
+    ] {
+        let needle = format!("{var} = ");
+        let (line, line_text) = content
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"));
+        let column = line_text.find(&needle).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, line as u32, column)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
 /// Outside any namespace or function-like construct, `__NAMESPACE__`,
 /// `__FUNCTION__`, and `__METHOD__` are all the empty string, matching
 /// PHP's top-level-code behaviour.

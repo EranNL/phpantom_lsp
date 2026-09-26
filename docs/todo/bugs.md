@@ -271,19 +271,20 @@ Found porting PHPStan's `Rules/Functions/data/varying-acceptor.php`; the asserti
 
 ## Miscellaneous
 
-### B482. `__PROPERTY__` inside a property hook resolves to its base type rather than its value
-**Impact: Low · Complexity: Low**
+### B489. `__FUNCTION__`/`__METHOD__` inside a property hook resolve to the empty string instead of the hook's name
+**Impact: Low · Complexity: Medium**
 
 ```php
 class User {
     public string $name {
         get {
-            __PROPERTY__; // should be 'name', is string
+            __FUNCTION__; // should be '$name::get', is ''
+            __METHOD__;   // should be 'User::$name::get', is ''
         }
     }
 }
 ```
 
-`__PROPERTY__` (PHP 8.4) is known at the point it is written, the way `__FUNCTION__`/`__METHOD__` are for a method.
+PHP names a property hook's implicit function `$name::get`/`$name::set`, the same way it names a closure `{closure}`. `EnclosingFunctionFinder` in `src/type_engine/variable/rhs_resolution/magic_constants.rs` only pushes onto its function stack for `Function`/`Method`/`Closure`/`ArrowFunction`; it does not push for `PropertyHook`, so a magic constant written directly inside a hook body falls off the stack (or picks up an unrelated enclosing method if the hook happens to be lexically nested in one, which it structurally cannot be) and resolves to the empty string.
 
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
+Found while fixing B482 (`__PROPERTY__` inside a property hook resolving to its base type).

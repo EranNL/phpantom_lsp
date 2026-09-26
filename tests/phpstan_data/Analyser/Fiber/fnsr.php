@@ -466,7 +466,7 @@ class MagicConstUser {
 		assertType("''", __TRAIT__);
 		assertType("'doFoo'", __FUNCTION__);
 		assertType("'FiberNodeScopeResolverTest\\\\MagicConstUser::doFoo'", __METHOD__);
-		assertType("''", __PROPERTY__); // SKIP: a magic constant resolves to its base type rather than its value
+		assertType("''", __PROPERTY__);
 	}
 }
 

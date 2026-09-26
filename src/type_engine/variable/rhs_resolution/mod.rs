@@ -62,7 +62,7 @@ use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
 use instantiation::resolve_rhs_instantiation;
-use magic_constants::{EnclosingFunction, enclosing_function_at};
+use magic_constants::{EnclosingFunction, enclosing_context_at};
 use property_access::resolve_rhs_property_access;
 
 pub(crate) use arithmetic::{
@@ -1414,8 +1414,8 @@ fn resolve_rhs_expression_inner<'b>(
 /// Every magic constant's value is known at the point it is written, so
 /// each resolves to the exact literal rather than its base type:
 /// `__LINE__` to the literal line number, `__NAMESPACE__`/`__FUNCTION__`/
-/// `__METHOD__`/`__TRAIT__` to the literal string PHP would substitute
-/// there. `__CLASS__` narrows further to `class-string<Foo>`, the way
+/// `__METHOD__`/`__TRAIT__`/`__PROPERTY__` to the literal string PHP would
+/// substitute there. `__CLASS__` narrows further to `class-string<Foo>`, the way
 /// `Foo::class` does, so the class identity survives into `new $class`
 /// and `class-string` parameters — the named inner type already pins it
 /// exactly. A trait body only knows it will be *some* class name at
@@ -1454,6 +1454,14 @@ fn magic_constant_type(magic: &MagicConstant<'_>, ctx: &VarResolutionCtx<'_>) ->
                 PhpType::literal_string_value(format!("{}::{}", ctx.current_class.fqn(), name))
             }
         }
+        MagicConstant::Property(_) => {
+            let offset = magic.span().start.offset;
+            PhpType::literal_string_value(
+                enclosing_context_at(ctx.content, offset)
+                    .property
+                    .unwrap_or_default(),
+            )
+        }
         _ => PhpType::string(),
     }
 }
@@ -1467,7 +1475,7 @@ fn enclosing_function_display_name(
     ctx: &VarResolutionCtx<'_>,
 ) -> String {
     let offset = magic.span().start.offset;
-    match enclosing_function_at(ctx.content, offset) {
+    match enclosing_context_at(ctx.content, offset).function {
         Some(EnclosingFunction::Named(name)) => name,
         Some(EnclosingFunction::Closure) => "{closure}".to_string(),
         None => String::new(),
