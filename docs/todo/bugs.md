@@ -34,23 +34,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B490. A variable a loop assigns reads as `never` past a later `=== null` guard
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$fetched = null;
-foreach ($files as $file) {
-    // …
-    /** @var FetchedNode<Node\Stmt\Const_> $fetched */
-    $fetched = current($nodes[$name]);
-}
-if ($fetched === null) {
-    return null;
-}
-$fetched->getNode(); // Cannot access method 'getNode' on type 'never'
-```
-
-The value the loop body assigned is lost at the loop's exit, so the variable is `null` alone below it and ruling out `null` leaves nothing. PHPStan's own `OptimizedDirectorySourceLocator.php:197` (the constant branch, with an inline `@var` on the assignment) and `FileTypeMapper.php:283` (`$useType = null;` before an inner `foreach` that assigns it and `break`s, inside an outer `foreach`) are both reported. Neither reduces to a small repro yet: the same shapes on their own analyse clean, so something else in the surrounding method takes part.
+No outstanding items.
 
 ## Arithmetic
 

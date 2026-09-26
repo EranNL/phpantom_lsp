@@ -108,10 +108,17 @@ pub(crate) fn process_while<'b>(
     }
 
     // The loop body might not execute at all (condition false on
-    // first check), so merge with the pre-loop scope.
-    let post_loop = scope.clone();
-    *scope = pre_loop_scope;
-    scope.merge_branch(&post_loop);
+    // first check), so merge with the pre-loop scope.  A loop that started
+    // out unreachable has no live "might not run" alternative to protect:
+    // `pre_loop_scope` is exactly as dead as what the body produced, so
+    // merging the two would only let `merge_branch`'s "an unreachable side
+    // contributes nothing" rule discard whatever the body actually
+    // assigned.  See the matching comment in `process_foreach`.
+    if !pre_loop_scope.unreachable {
+        let post_loop = scope.clone();
+        *scope = pre_loop_scope;
+        scope.merge_branch(&post_loop);
+    }
 
     // After the loop, the condition evaluated to false (that's why the
     // loop exited).  Apply the inverse of the condition to narrow types.
@@ -282,8 +289,10 @@ pub(crate) fn process_for<'b>(
     process_for_updates(for_stmt, scope, ctx);
 
     // Unless the conditions hold on entry, the loop body might not execute
-    // at all, so merge with the pre-loop scope.
-    if !always_enters {
+    // at all, so merge with the pre-loop scope.  As in `process_while` and
+    // `process_foreach`, a loop that started out unreachable has nothing
+    // live to protect by reverting to `pre_loop_scope` first.
+    if !always_enters && !pre_loop_scope.unreachable {
         let post_loop = scope.clone();
         *scope = pre_loop_scope;
         scope.merge_branch(&post_loop);

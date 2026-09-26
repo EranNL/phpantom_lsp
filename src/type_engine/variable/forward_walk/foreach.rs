@@ -631,7 +631,16 @@ pub(crate) fn process_foreach<'b>(
                 .as_ref()
                 .is_some_and(PhpType::is_provably_non_empty));
 
-    if !body_always_runs {
+    // A loop that started out unreachable (the branch it lives in was
+    // already proven impossible) has no live "might not run" alternative
+    // to protect: `pre_loop_scope` is exactly as dead as what the body
+    // produced, so merging the two is not a real join, just
+    // `merge_branch`'s "an unreachable side contributes nothing" rule
+    // discarding whatever the body actually assigned.  Keeping the walked
+    // state instead matches how a plain assignment in the same dead
+    // branch already behaves — it is not reverted just because it went
+    // through a loop.
+    if !body_always_runs && !pre_loop_scope.unreachable {
         // The iterable might be empty, so the loop body might not execute
         // at all.  Merge with the pre-loop scope.
         let post_loop = scope.clone();
