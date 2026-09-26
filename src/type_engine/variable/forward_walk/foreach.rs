@@ -580,6 +580,15 @@ pub(crate) fn process_foreach<'b>(
 
     let exits = exit_frame.pop();
 
+    // A cursor inside the body is answered by the walk that stopped at it.
+    // Everything below describes the state after the loop, and merging in
+    // the pre-loop scope (the loop might not run) would bring back what an
+    // enclosing loop's earlier pass left in a variable the body has since
+    // reassigned above the cursor.
+    if cursor_in_body && !is_diagnostic_scope_active() {
+        return;
+    }
+
     // Snapshot the array's freshly-written type here, while `scope` still
     // holds the raw post-body state: it is what every entry looks like
     // after the write the loop applies to the key it is visiting. A

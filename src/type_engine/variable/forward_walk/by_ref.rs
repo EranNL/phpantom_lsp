@@ -534,13 +534,109 @@ pub(crate) fn process_pass_by_ref<'b>(
     }
 }
 
-/// Define the locals an `extract($shape)` call writes, one per key.
+/// How `extract()` treats a key, from its `flags` argument (with the
+/// `EXTR_REFS` bit, which changes no types, masked off).
+#[derive(Clone, Copy, PartialEq)]
+enum ExtractMode {
+    Overwrite,
+    Skip,
+    PrefixSame,
+    PrefixAll,
+    PrefixInvalid,
+    PrefixIfExists,
+    IfExists,
+}
+
+impl ExtractMode {
+    fn from_flags(flags: i64) -> Option<Self> {
+        Some(match flags & !256 {
+            0 => Self::Overwrite,
+            1 => Self::Skip,
+            2 => Self::PrefixSame,
+            3 => Self::PrefixAll,
+            4 => Self::PrefixInvalid,
+            5 => Self::PrefixIfExists,
+            6 => Self::IfExists,
+            _ => return None,
+        })
+    }
+
+    fn is_prefixed(self) -> bool {
+        matches!(
+            self,
+            Self::PrefixSame | Self::PrefixAll | Self::PrefixInvalid | Self::PrefixIfExists
+        )
+    }
+
+    /// The local a key is written to, if any.  `exists` says whether a
+    /// local of that name is in scope, which is what the conditional
+    /// modes test.
+    fn target(self, key: &str, prefix: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
+        let prefixed = || format!("{prefix}_{key}");
+        let name = match self {
+            Self::Overwrite => key.to_string(),
+            Self::Skip if exists(key) => return None,
+            Self::Skip => key.to_string(),
+            Self::PrefixSame if is_extractable_variable_name(key) && exists(key) => prefixed(),
+            Self::PrefixSame => key.to_string(),
+            Self::PrefixAll => prefixed(),
+            Self::PrefixInvalid if is_extractable_variable_name(key) => key.to_string(),
+            Self::PrefixInvalid => prefixed(),
+            Self::PrefixIfExists if exists(key) => prefixed(),
+            Self::IfExists if exists(key) => key.to_string(),
+            Self::PrefixIfExists | Self::IfExists => return None,
+        };
+        is_extractable_variable_name(&name).then_some(name)
+    }
+
+    /// Whether a call whose keys are not known may write the local `name`.
+    fn may_write_any(self, name: &str, prefix: &str) -> bool {
+        match self {
+            Self::Skip => false,
+            // A key that collides is written under the prefix, and one that
+            // does not names a variable that is not there yet.
+            Self::PrefixSame | Self::PrefixAll | Self::PrefixIfExists => name
+                .strip_prefix(prefix)
+                .is_some_and(|rest| rest.starts_with('_')),
+            Self::Overwrite | Self::PrefixInvalid | Self::IfExists => true,
+        }
+    }
+}
+
+/// The value of an `extract()` flags argument: `EXTR_*` constants and
+/// integer literals, combined with `|`.
+fn extract_flags_value(expr: &Expression<'_>) -> Option<i64> {
+    match expr {
+        Expression::Parenthesized(inner) => extract_flags_value(inner.expression),
+        Expression::Binary(binary) if matches!(binary.operator, BinaryOperator::BitwiseOr(_)) => {
+            Some(extract_flags_value(binary.lhs)? | extract_flags_value(binary.rhs)?)
+        }
+        Expression::Literal(Literal::Integer(int)) => int.value.map(|v| v as i64),
+        Expression::ConstantAccess(access) => {
+            let name = bytes_to_str(access.name.value());
+            Some(match name.rsplit('\\').next().unwrap_or(name) {
+                "EXTR_OVERWRITE" => 0,
+                "EXTR_SKIP" => 1,
+                "EXTR_PREFIX_SAME" => 2,
+                "EXTR_PREFIX_ALL" => 3,
+                "EXTR_PREFIX_INVALID" => 4,
+                "EXTR_PREFIX_IF_EXISTS" => 5,
+                "EXTR_IF_EXISTS" => 6,
+                "EXTR_REFS" => 256,
+                _ => return None,
+            })
+        }
+        _ => None,
+    }
+}
+
+/// Define the locals an `extract()` call writes.
 ///
-/// With the default `EXTR_OVERWRITE` flag every string key that is a
-/// valid variable name becomes a local holding its value, so a required
-/// key replaces whatever the variable held and an optional one may.
-/// Returns whether the call was handled: an argument that is not a
-/// single array shape, or an explicit flags argument, is left alone.
+/// An array shape writes one local per key, under the name and on the
+/// condition its flags say, so a required key replaces whatever the
+/// variable held and an optional one may.  An array whose keys are not
+/// known may write any local the flags allow with anything, so each of
+/// those widens to `mixed`.  Returns whether the call was an `extract()`.
 fn process_extract_call<'b>(
     expr: &'b Expression<'b>,
     scope: &mut ScopeState,
@@ -558,48 +654,78 @@ fn process_extract_call<'b>(
     {
         return false;
     }
-    let mut args = call.argument_list.arguments.iter();
-    let (Some(Argument::Positional(arg)), None) = (args.next(), args.next()) else {
-        return false;
+    let mut array_arg = None;
+    let mut flags_arg = None;
+    let mut prefix_arg = None;
+    let mut unpacked = false;
+    let mut next_positional = 0;
+    for arg in call.argument_list.arguments.iter() {
+        if let Argument::Positional(pos) = arg
+            && pos.ellipsis.is_some()
+        {
+            unpacked = true;
+        }
+        let (value, selector) = arg_expr_and_selector(arg, &mut next_positional);
+        let slot = match selector {
+            ArgSelector::Position(0) => &mut array_arg,
+            ArgSelector::Position(1) => &mut flags_arg,
+            ArgSelector::Position(2) => &mut prefix_arg,
+            ArgSelector::Name(name) if name == "array" => &mut array_arg,
+            ArgSelector::Name(name) if name == "flags" => &mut flags_arg,
+            ArgSelector::Name(name) if name == "prefix" => &mut prefix_arg,
+            _ => continue,
+        };
+        *slot = Some(value);
+    }
+    let Some(array_arg) = array_arg else {
+        return true;
     };
-    if arg.ellipsis.is_some() {
-        return false;
-    }
-    let types = super::assignment::resolve_rhs_with_scope(arg.value, scope, ctx);
-    if types.is_empty() {
-        return false;
-    }
+    let mode = match flags_arg {
+        None => Some(ExtractMode::Overwrite),
+        Some(flags) => extract_flags_value(flags).and_then(ExtractMode::from_flags),
+    };
+    let prefix = prefix_arg.and_then(crate::type_engine::types::narrowing::string_literal_value);
+    let mode = match mode {
+        Some(mode) if !unpacked && (prefix.is_some() || !mode.is_prefixed()) => mode,
+        _ => {
+            widen_extractable_locals(scope, |_| true);
+            return true;
+        }
+    };
+    let prefix = prefix.as_deref().unwrap_or("");
+
+    let types = super::assignment::resolve_rhs_with_scope(array_arg, scope, ctx);
     let array = ResolvedType::types_joined(&types);
     // Each alternative of a union of shapes writes its own keys, so a key
     // the others lack is only possibly written.
-    let shapes: Vec<&[ShapeEntry]> = match array.kind() {
-        TypeKind::ArrayShape(entries) => vec![&entries[..]],
-        TypeKind::Union(members) => {
-            let shapes: Vec<&[ShapeEntry]> = members
-                .iter()
-                .filter_map(|m| match m.kind() {
-                    TypeKind::ArrayShape(entries) => Some(&entries[..]),
-                    _ => None,
-                })
-                .collect();
-            if shapes.len() != members.len() {
-                return false;
-            }
-            shapes
-        }
-        _ => return false,
+    let shapes: Option<Vec<&[ShapeEntry]>> = match array.kind() {
+        _ if types.is_empty() => None,
+        TypeKind::ArrayShape(entries) => Some(vec![&entries[..]]),
+        TypeKind::Union(members) => members
+            .iter()
+            .map(|m| match m.kind() {
+                TypeKind::ArrayShape(entries) => Some(&entries[..]),
+                _ => None,
+            })
+            .collect(),
+        _ => None,
     };
+    let Some(shapes) = shapes else {
+        widen_extractable_locals(scope, |name| mode.may_write_any(name, prefix));
+        return true;
+    };
+    let exists = |name: &str| scope.contains(&format!("${name}"));
     // (name, value, optional, alternatives writing it), in key order.
-    let mut written: Vec<(&str, Vec<PhpType>, bool, usize)> = Vec::new();
+    let mut written: Vec<(String, Vec<PhpType>, bool, usize)> = Vec::new();
     for entries in &shapes {
-        for entry in entries.iter() {
-            let Some(key) = entry.key.as_deref() else {
+        for (position, entry) in entries.iter().enumerate() {
+            let key = match entry.key.as_deref() {
+                Some(key) => key.trim_matches(|c| c == '\'' || c == '"').to_string(),
+                None => position.to_string(),
+            };
+            let Some(name) = mode.target(&key, prefix, exists) else {
                 continue;
             };
-            let name = key.trim_matches(|c| c == '\'' || c == '"');
-            if !is_extractable_variable_name(name) {
-                continue;
-            }
             match written.iter_mut().find(|(n, ..)| *n == name) {
                 Some((_, values, optional, count)) => {
                     values.push(entry.value_type.clone());
@@ -618,12 +744,34 @@ fn process_extract_call<'b>(
                 values.insert(0, ResolvedType::types_joined(existing));
             }
         }
+        scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_proofs(&var_name);
         scope.set(
             &var_name,
             vec![ResolvedType::from_type_string(PhpType::union(values))],
         );
     }
     true
+}
+
+/// Widen to `mixed` every local an `extract()` of unknown keys may have
+/// written, as `may_write` (given the name without its `$`) allows.
+fn widen_extractable_locals(scope: &mut ScopeState, may_write: impl Fn(&str) -> bool) {
+    let names: Vec<String> = scope
+        .locals
+        .keys()
+        .filter_map(|key| key.strip_prefix('$'))
+        .filter(|name| is_extractable_variable_name(name) && may_write(name))
+        .map(|name| format!("${name}"))
+        .collect();
+    for var_name in names {
+        scope.invalidate_dependent_keys(&var_name);
+        scope.invalidate_proofs(&var_name);
+        scope.set(
+            &var_name,
+            vec![ResolvedType::from_type_string(PhpType::mixed())],
+        );
+    }
 }
 
 /// Whether `extract()` turns an array key into a local: a valid PHP

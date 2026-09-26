@@ -603,6 +603,26 @@ pub(crate) fn is_decimal_int_array_key(content: &str) -> bool {
             .is_ok_and(|parsed| parsed.to_string() == content)
 }
 
+/// Whether `isset($string[$key])` can hold for this string key: PHP only
+/// sets a string's integer offsets, and accepts any integer-numeric
+/// spelling of one (`"1"`, `"01"`, `" 1"`, `"+1"`), but not a fraction
+/// (`"1.0"`), a trailing non-digit (`"1x"`), or a word.
+pub(crate) fn may_be_set_string_offset(key: &str) -> bool {
+    let trimmed = key.trim_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
+}
+
+/// Whether reading `$string[$key]` can yield a character.  A key that does
+/// not begin with an integer names no offset at all: the read throws, and
+/// under `??` it falls back to the default.  A leading-numeric one (`"1x"`)
+/// still reads the character at that integer, with a warning.
+pub(crate) fn may_read_string_offset(key: &str) -> bool {
+    let trimmed = key.trim_start_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c']);
+    let digits = trimmed.strip_prefix(['+', '-']).unwrap_or(trimmed);
+    digits.bytes().next().is_some_and(|b| b.is_ascii_digit())
+}
+
 /// The runtime array key each shape entry occupies, in order.
 ///
 /// A positional entry takes the next free integer index, mirroring the
@@ -2076,13 +2096,23 @@ impl PhpType {
                 (!entries.is_empty()).then(PhpType::string)
             }
             TypeKind::Generic(g) if g.args.len() >= 2 => Some(g.args[0].clone()),
+            // A list's keys count up from zero.
             TypeKind::Generic(g)
                 if g.args.len() == 1
                     && matches!(
                         g.name.to_ascii_lowercase().as_str(),
-                        // A single-argument `array<T>` names its value type,
-                        // leaving the same implicit integer keys as `T[]`.
-                        "list" | "non-empty-list" | "array" | "non-empty-array"
+                        "list" | "non-empty-list"
+                    ) =>
+            {
+                Some(PhpType::int_range("0", "max"))
+            }
+            // A single-argument `array<T>` names its value type, leaving
+            // the same implicit integer keys as `T[]`.
+            TypeKind::Generic(g)
+                if g.args.len() == 1
+                    && matches!(
+                        g.name.to_ascii_lowercase().as_str(),
+                        "array" | "non-empty-array"
                     ) =>
             {
                 Some(PhpType::int())

@@ -105,11 +105,8 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B485 | [The key of a `foreach` over a list is `int`, not `int<0, max>`](todo/bugs.md#b485-the-key-of-a-foreach-over-a-list-is-int-not-int0-max) | Low-Medium | Low |
-| B488 | [`isset()` on a non-numeric offset does not rule out `string`](todo/bugs.md#b488-isset-on-a-non-numeric-offset-does-not-rule-out-string) | Low-Medium | Low-Medium |
+| B490 | [A variable a loop assigns reads as `never` past a later `=== null` guard](todo/bugs.md#b490-a-variable-a-loop-assigns-reads-as-never-past-a-later--null-guard) | Low-Medium | Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
-| B484 | [`extract()` with flags or a non-shape array leaves the locals untouched](todo/bugs.md#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched) | Low | Medium |
-| B487 | [A read inside nested loops keeps what an earlier pass of the outer loop saw](todo/bugs.md#b487-a-read-inside-nested-loops-keeps-what-an-earlier-pass-of-the-outer-loop-saw) | Low | Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
 | B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |
 | B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |

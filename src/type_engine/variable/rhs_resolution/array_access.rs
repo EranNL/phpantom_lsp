@@ -330,8 +330,15 @@ fn index_segment(
         // any key yields `mixed`.
         return Some(PhpType::mixed());
     }
-    // A string offset is itself a one-character string.
+    // A string offset is itself a one-character string, and a key that
+    // names no offset reads nothing: the read throws, so a string member
+    // of a union adds nothing to what the others hold.
     if base.is_string_subtype() {
+        if let ArrayBracketSegment::StringKey(key) = seg
+            && !crate::php_type::may_read_string_offset(key)
+        {
+            return Some(PhpType::never());
+        }
         return Some(PhpType::string());
     }
     // Reading an offset off anything else that is not an object yields

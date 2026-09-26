@@ -324,7 +324,7 @@ function probe(
             ("SHORTHAND", "int|string"),
             ("OPEN", "int|string"),
             ("FILLED", "int|string"),
-            ("LIST", "int"),
+            ("LIST", "int<0, max>"),
             ("NAMED", "string"),
         ],
     );

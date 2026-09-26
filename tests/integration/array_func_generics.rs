@@ -38,7 +38,7 @@ function probe(array $byName, array $users, array $bare): void {
         content,
         &[
             ("$names", "list<string>"),
-            ("$indices", "list<int>"),
+            ("$indices", "list<int<0, max>>"),
             ("$first", "string|null"),
             ("$last", "string|null"),
             ("$cursor", "string|null"),
@@ -65,7 +65,7 @@ function probe(array $byName, array $names): void {
 "#;
     assert_assigned_types(
         content,
-        &[("$key", "string|false"), ("$index", "int|false")],
+        &[("$key", "string|false"), ("$index", "int<0, max>|false")],
     );
 }
 
@@ -310,7 +310,7 @@ function probe(array $rows, array $names): void {
         content,
         &[
             ("$picked", "array<string, int>"),
-            ("$listed", "array<int, string>"),
+            ("$listed", "array<int<0, max>, string>"),
         ],
     );
 }
@@ -825,7 +825,7 @@ function probe(array $users, array $orders, array $byName): void {
         &[
             ("$seeded", "list<User>"),
             ("$both", "list<User|Order>"),
-            ("$three", "array<int|string, User|Order>"),
+            ("$three", "array<int<0, max>|string, User|Order>"),
         ],
     );
 }
@@ -860,7 +860,7 @@ function probe(array $users, array $byName, array $ordersByName, array $loose, a
         content,
         &[
             ("$strings", "array<string, User|Order>"),
-            ("$mixed", "array<int|string, User>"),
+            ("$mixed", "array<int<0, max>|string, User>"),
             ("$open", "array<User>"),
             ("$shorthandOpen", "array<User>"),
         ],

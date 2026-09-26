@@ -34,22 +34,23 @@ No outstanding items.
 
 ## Narrowing
 
-### B488. `isset()` on a non-numeric offset does not rule out `string`
-**Impact: Low-Medium · Complexity: Low-Medium**
+### B490. A variable a loop assigns reads as `never` past a later `=== null` guard
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
-/** @param list<string|array{message?: string, count?: int}> $list */
-function f(array $list) {
-    foreach ($list as $e) {
-        if (!isset($e['message'])) {
-            continue;
-        }
-        $e; // should be array{message: string, count?: int}, is string|array{message: string, count?: int}
-    }
+$fetched = null;
+foreach ($files as $file) {
+    // …
+    /** @var FetchedNode<Node\Stmt\Const_> $fetched */
+    $fetched = current($nodes[$name]);
 }
+if ($fetched === null) {
+    return null;
+}
+$fetched->getNode(); // Cannot access method 'getNode' on type 'never'
 ```
 
-`isset()` narrows each array shape in the union but leaves `string` in place, although a string offset that is not an integer is never set. Reading another offset off the narrowed value then yields `string` as well, and arithmetic on it widens to `int|float`. PHPStan's own `IgnoredErrorHelper::initialize()` hits this on the entries it rebuilds from `$ignoreError['count'] ?? 1` and `$ignoreError['reportUnmatched'] ?? …`, so `IgnoredErrorHelper.php:173` is reported three times (the `index` key of the same entries is B485).
+The value the loop body assigned is lost at the loop's exit, so the variable is `null` alone below it and ruling out `null` leaves nothing. PHPStan's own `OptimizedDirectorySourceLocator.php:197` (the constant branch, with an inline `@var` on the assignment) and `FileTypeMapper.php:283` (`$useType = null;` before an inner `foreach` that assigns it and `break`s, inside an outer `foreach`) are both reported. Neither reduces to a small repro yet: the same shapes on their own analyse clean, so something else in the surrounding method takes part.
 
 ## Arithmetic
 
@@ -57,58 +58,11 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B484. `extract()` with flags or a non-shape array leaves the locals untouched
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(array $data) {
-    $x = 1;
-    extract($data);
-    $x; // should be mixed, is 1
-    extract(['y' => 's'], EXTR_PREFIX_ALL, 'p');
-    $p_y; // should be 's', resolves to nothing
-}
-```
-
-Only a single-argument `extract()` of an array shape defines its keys. An argument whose keys are not known may overwrite any local with anything, so every variable in scope should widen to `mixed` after the call (PHPStan's `afterExtractCall()`). An explicit flags argument changes which keys are written (`EXTR_SKIP`, `EXTR_IF_EXISTS`) and under what names (`EXTR_PREFIX_*`), and is not modelled at all.
+No outstanding items.
 
 ## Array types
 
-### B485. The key of a `foreach` over a list is `int`, not `int<0, max>`
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-/** @param list<string> $l */
-function f(array $l) {
-    foreach ($l as $k => $v) {
-        $k; // should be int<0, max>, is int
-    }
-}
-```
-
-A list's keys are the non-negative integers, so iterating one binds the key to `int<0, max>`, whether the list is declared or built by `$out[] = …` in the same function. Storing the key where `int<0, max>` is declared then fails the argument check: PHPStan's own `IgnoredErrorHelper::process()` passes `['index' => $i, …]` from such a loop to a parameter typed `array{index: int<0, max>, …}` and is reported.
-
-### B487. A read inside nested loops keeps what an earlier pass of the outer loop saw
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(array $percentageIntervals, array $changes): void {
-    $intervalResults = [];
-    foreach ($percentageIntervals as $interval) {
-        foreach ($changes as $change) {
-            $key = $interval->getFormatted();
-            if (!array_key_exists($key, $intervalResults)) {
-                $x = $intervalResults[$key]; // should be array{itemsCount: mixed, interval: mixed}, is null|array{…}
-                $intervalResults[$key] = ['itemsCount' => $change, 'interval' => $interval];
-            }
-        }
-    }
-}
-```
-
-The array itself reads back as `array<array{…}>` at that point. The `null` comes from the outer loop's first pass, when `$intervalResults` was still `[]`: the assignment's type is the union of every pass that reached it rather than what the loop's fixed point holds. A single loop, or a key that is not reassigned inside the inner loop, does not show it.
-
-Found porting PHPStan's `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
+No outstanding items.
 
 ## Laravel
 

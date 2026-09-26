@@ -20,7 +20,7 @@ class Foo
 						assertType('array{itemsCount: (array|float|int), interval: mixed}', $intervalResults[$key]);
 					} else {
 						assertType('array<array{itemsCount: mixed, interval: mixed}>', $intervalResults);
-						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]); // SKIP: a read inside nested loops keeps the value an earlier pass of the outer loop saw, when the array was still empty
+						assertType('array{itemsCount: mixed, interval: mixed}', $intervalResults[$key]);
 						$intervalResults[$key] = [
 							'itemsCount' => $itemsCount,
 							'interval' => $percentageInterval,

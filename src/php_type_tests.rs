@@ -707,16 +707,18 @@ fn shape_keys_round_trip_through_their_display_form() {
 
 #[test]
 fn iterable_key_type_makes_implicit_int_keys_explicit() {
-    for spelling in [
-        "list<User>",
-        "non-empty-list<User>",
-        "array<User>",
-        "non-empty-array<User>",
-        "User[]",
-    ] {
+    for spelling in ["array<User>", "non-empty-array<User>", "User[]"] {
         assert_eq!(
             PhpType::parse(spelling).iterable_key_type().unwrap(),
             PhpType::int(),
+            "{spelling}"
+        );
+    }
+    // A list's keys count up from zero.
+    for spelling in ["list<User>", "non-empty-list<User>"] {
+        assert_eq!(
+            PhpType::parse(spelling).iterable_key_type().unwrap(),
+            PhpType::int_range("0", "max"),
             "{spelling}"
         );
     }

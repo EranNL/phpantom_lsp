@@ -391,8 +391,25 @@ pub(crate) fn strip_null_from_shape_key(
             PhpType::nullable(strip_null_from_shape_key(inner, key))
         }
         TypeKind::Union(members) => {
+            // The key is set, so the members that never have that offset
+            // set drop out: a string's offsets are integers, and `isset()`
+            // on an offset of a scalar of any other kind is always false.
+            // A union with nothing left contradicts the check; it stays
+            // whole rather than becoming `never`.
+            let string_may_hold = crate::php_type::may_be_set_string_offset(key);
+            let can_hold_key = |m: &PhpType| {
+                !(m.is_null()
+                    || m.is_bool()
+                    || m.is_true()
+                    || m.is_false()
+                    || m.is_int_subtype()
+                    || m.is_float_subtype()
+                    || (!string_may_hold && m.is_string_subtype()))
+            };
+            let keep_all = !members.iter().any(can_hold_key);
             let new_members: Vec<PhpType> = members
                 .iter()
+                .filter(|m| keep_all || can_hold_key(m))
                 .map(|m| strip_null_from_shape_key(m, key))
                 .collect();
             PhpType::union(new_members)
