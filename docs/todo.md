@@ -117,7 +117,6 @@ unlikely to move the needle for most users.
 | B470 | [An offset access on a type alias is not evaluated](todo/bugs.md#b470-an-offset-access-on-a-type-alias-is-not-evaluated) | Low | Medium |
 | B480 | [An argument outside a method template's bound binds the template anyway](todo/bugs.md#b480-an-argument-outside-a-method-templates-bound-binds-the-template-anyway) | Low | Medium |
 | B472 | [A template bound through a nested callable parameter is not inferred](todo/bugs.md#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred) | Low | Medium |
-| B489 | [`__FUNCTION__`/`__METHOD__` inside a property hook resolve to the empty string instead of the hook's name](todo/bugs.md#b489-__function__method__-inside-a-property-hook-resolve-to-the-empty-string-instead-of-the-hooks-name) | Low | Medium |
 | B468 | [A conditional return type on `$param is not null` does not pick up a template bound by a callable argument](todo/bugs.md#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

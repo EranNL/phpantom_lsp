@@ -11,6 +11,7 @@
 use mago_span::HasSpan;
 use mago_syntax::cst::class_like::method::Method;
 use mago_syntax::cst::class_like::property::HookedProperty;
+use mago_syntax::cst::class_like::property::PropertyHook;
 use mago_syntax::cst::function_like::arrow_function::ArrowFunction;
 use mago_syntax::cst::function_like::closure::Closure;
 use mago_syntax::cst::function_like::function::Function;
@@ -83,6 +84,18 @@ impl<'ast, 'arena> Walker<'ast, 'arena, FinderState> for EnclosingFunctionFinder
     }
 
     fn walk_out_arrow_function(&self, _node: &'ast ArrowFunction<'arena>, ctx: &mut FinderState) {
+        ctx.function_stack.pop();
+    }
+
+    fn walk_in_property_hook(&self, node: &'ast PropertyHook<'arena>, ctx: &mut FinderState) {
+        let property_name = ctx.property_stack.last().map_or("", String::as_str);
+        let hook_name = bytes_to_str(node.name.value);
+        ctx.function_stack.push(EnclosingFunction::Named(format!(
+            "${property_name}::{hook_name}"
+        )));
+    }
+
+    fn walk_out_property_hook(&self, _node: &'ast PropertyHook<'arena>, ctx: &mut FinderState) {
         ctx.function_stack.pop();
     }
 

@@ -15581,6 +15581,53 @@ class User {
     }
 }
 
+/// PHP names a property hook's implicit function `$name::get`/`$name::set`,
+/// so `__FUNCTION__` inside a hook body resolves to that, and `__METHOD__`
+/// prefixes it with the enclosing class, not to the empty string a hook
+/// falling off the enclosing-function stack would produce.
+#[test]
+fn hover_magic_constants_function_and_method_inside_hooks() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class User {
+    public string $name {
+        get {
+            $inGetFunction = __FUNCTION__;
+            $inGetMethod = __METHOD__;
+            return $this->name;
+        }
+        set(string $value) {
+            $inSetFunction = __FUNCTION__;
+            $inSetMethod = __METHOD__;
+            $this->name = $value;
+        }
+    }
+}
+"#;
+    for (var, want) in [
+        ("$inGetFunction", "'$name::get'"),
+        ("$inGetMethod", "'User::$name::get'"),
+        ("$inSetFunction", "'$name::set'"),
+        ("$inSetMethod", "'User::$name::set'"),
+    ] {
+        let needle = format!("{var} = ");
+        let (line, line_text) = content
+            .lines()
+            .enumerate()
+            .find(|(_, l)| l.trim_start().starts_with(&needle))
+            .unwrap_or_else(|| panic!("no assignment to {var} in the fixture"));
+        let column = line_text.find(&needle).unwrap() as u32 + 1;
+        let hover = hover_at(&backend, uri, content, line as u32, column)
+            .unwrap_or_else(|| panic!("no hover for {var}"));
+        assert!(
+            hover_text(&hover).contains(&format!("{var} = {want}")),
+            "{var} should be {want}, got: {}",
+            hover_text(&hover)
+        );
+    }
+}
+
 /// Outside any namespace or function-like construct, `__NAMESPACE__`,
 /// `__FUNCTION__`, and `__METHOD__` are all the empty string, matching
 /// PHP's top-level-code behaviour.
