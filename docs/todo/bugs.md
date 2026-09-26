@@ -311,19 +311,3 @@ class User {
 `__PROPERTY__` (PHP 8.4) is known at the point it is written, the way `__FUNCTION__`/`__METHOD__` are for a method.
 
 Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B475. A variable a closure captures by reference does not take on the closure's assignments
-**Impact: Low · Complexity: Medium**
-
-```php
-$a = 0;
-$cb = function () use (&$a): void {
-    $a; // should be 0|'s', is 0
-    $a = 's';
-};
-$a; // should be 0|'s', is 0
-```
-
-A by-reference capture shares the variable with the closure, and the closure may run any number of times before or after either read. Both sides should see the union of every value the closure assigns.
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.

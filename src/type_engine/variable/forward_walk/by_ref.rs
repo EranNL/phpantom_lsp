@@ -335,6 +335,92 @@ pub(crate) fn node_param_has_invocation_tag(
     })
 }
 
+/// The `use (&$x)` variables a closure captures by reference, in
+/// declaration order.
+pub(crate) fn by_ref_captured_names(closure: &Closure<'_>) -> Vec<String> {
+    closure
+        .use_clause
+        .as_ref()
+        .map(|use_clause| {
+            use_clause
+                .variables
+                .iter()
+                .filter(|use_var| use_var.ampersand.is_some())
+                .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Refine a closure's `use (&$x)` entry types to account for the body
+/// reassigning them.
+///
+/// The closure may run any number of times relative to whatever point is
+/// being resolved (before, after, or several times around it), so a read
+/// anywhere in the body — including its very first statement — must see
+/// not just what the capture held before the closure literal, but also
+/// whatever a previous run of the body could have left it holding:
+///
+/// ```php
+/// $a = 0;
+/// $cb = function () use (&$a): void {
+///     $a; // 0|'s' — a previous run may already have assigned 's'
+///     $a = 's';
+/// };
+/// ```
+///
+/// This is exactly the loop fixed-point problem
+/// (`walk_loop_body_to_fixed_point`) with the closure body standing in
+/// for a loop body of unknown trip count: re-walk a cursor-suppressed
+/// copy of the body, union each capture's exit types back into its entry,
+/// and repeat until nothing new appears. Capped by the body's own
+/// assignment-dependency depth, exactly as a loop body is.
+pub(crate) fn seed_by_ref_capture_fixed_point<'b>(
+    closure: &'b Closure<'b>,
+    closure_scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    captured: &[String],
+) {
+    if captured.is_empty() {
+        return;
+    }
+    let body_stmts: Vec<&Statement<'_>> = closure.body.statements.iter().collect();
+    let depth = assignment_map_depth(&body_stmts);
+    if depth <= 1 {
+        return;
+    }
+
+    let discovery_ctx = ctx.with_cursor_offset(u32::MAX);
+    let seed_scope = closure_scope.clone();
+    let mut entry_scope = seed_scope.clone();
+
+    for _ in 0..depth.saturating_sub(1) {
+        let mut probe = entry_scope.clone();
+        let return_frame = push_return_frame();
+        walk_body_forward(body_stmts.iter().copied(), &mut probe, &discovery_ctx);
+        if let Some(returned) = return_frame.finish() {
+            probe.merge_branch(&returned);
+        }
+
+        let mut next_entry = seed_scope.clone();
+        let mut changed = false;
+        for var_name in captured {
+            let mut combined = seed_scope.get(var_name).to_vec();
+            ResolvedType::extend_unique(&mut combined, probe.get(var_name).to_vec());
+            if resolved_types_differ(&combined, entry_scope.get(var_name)) {
+                changed = true;
+            }
+            next_entry.set(var_name, combined);
+        }
+        entry_scope = next_entry;
+        if !changed {
+            break;
+        }
+    }
+
+    *closure_scope = entry_scope;
+}
+
 /// Walk a closure body and propagate the types it assigns to `use (&$x)`
 /// captures back into the outer scope.
 ///
@@ -357,18 +443,7 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
     invoked_immediately: bool,
     runs_once: bool,
 ) {
-    let captured: Vec<String> = closure
-        .use_clause
-        .as_ref()
-        .map(|use_clause| {
-            use_clause
-                .variables
-                .iter()
-                .filter(|use_var| use_var.ampersand.is_some())
-                .map(|use_var| bytes_to_str(use_var.variable.name).to_string())
-                .collect()
-        })
-        .unwrap_or_default();
+    let captured = by_ref_captured_names(closure);
     if captured.is_empty() {
         return;
     }
@@ -387,6 +462,8 @@ pub(crate) fn process_by_ref_closure_capture<'b>(
         &[],
         &full_ctx,
     );
+
+    seed_by_ref_capture_fixed_point(closure, &mut closure_scope, &full_ctx, &captured);
 
     let return_frame = push_return_frame();
     walk_body_forward(

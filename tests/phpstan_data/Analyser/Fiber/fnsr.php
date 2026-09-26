@@ -332,7 +332,7 @@ function (): void {
 function (): void {
 	$a = 0;
 	$cb = function () use (&$a): void {
-		assertType('0|\'s\'', $a); // SKIP: a variable a closure captures by reference does not take on the closure's assignments
+		assertType('0|\'s\'', $a);
 		$a = 's';
 	};
 	assertType('0|\'s\'', $a);
@@ -352,7 +352,7 @@ function (): void {
 function (): void {
 	$a = 0;
 	$cb = function () use (&$a): void {
-		assertType('0|1', $a); // SKIP: a variable a closure captures by reference does not take on the closure's assignments
+		assertType('0|1', $a);
 		$a = 1;
 	};
 	assertType('0|1', $a);

@@ -357,6 +357,9 @@ pub(crate) fn try_enter_closure_expr<'b>(
                     ctx,
                 );
 
+                let captured = by_ref_captured_names(closure);
+                seed_by_ref_capture_fixed_point(closure, &mut closure_scope, ctx, &captured);
+
                 {
                     let _barrier = suspend_return_edges();
                     walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
