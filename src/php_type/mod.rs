@@ -2496,7 +2496,8 @@ impl PhpType {
         }
         let mut members: Vec<PhpType> = a.union_members().into_iter().cloned().collect();
         'incoming: for m in b.union_members() {
-            for existing in members.iter_mut() {
+            let mut replaced = None;
+            for (index, existing) in members.iter_mut().enumerate() {
                 if existing.equivalent(m) {
                     continue 'incoming;
                 }
@@ -2505,14 +2506,27 @@ impl PhpType {
                 }
                 if is_runtime_value_subtype(existing, m) {
                     *existing = m.clone();
-                    continue 'incoming;
+                    replaced = Some(index);
+                    break;
                 }
                 if let Some(joined) = existing.join_shapes(m) {
                     *existing = joined;
                     continue 'incoming;
                 }
             }
-            members.push(m.clone());
+            match replaced {
+                // The incoming member may cover more than the one it took
+                // the place of: `'b'|'c'` joined with `string` is `string`.
+                Some(index) => {
+                    let mut position = 0;
+                    members.retain(|existing| {
+                        let keep = position <= index || !is_runtime_value_subtype(existing, m);
+                        position += 1;
+                        keep
+                    });
+                }
+                None => members.push(m.clone()),
+            }
         }
         if members.len() == 1 {
             members.into_iter().next().unwrap()

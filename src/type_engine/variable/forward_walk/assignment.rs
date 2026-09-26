@@ -882,6 +882,19 @@ pub(crate) fn process_compound_assignment<'b>(
 
     let var_name = match assignment.lhs {
         Expression::Variable(Variable::Direct(dv)) => bytes_to_str(dv.name).to_string(),
+        // `$totals[(string) $item] ??= 0;` stores the element's non-null
+        // half or the fallback into the array, whatever the key is spelled
+        // as: it is the same write `=` makes with that value.
+        Expression::ArrayAccess(array_access)
+            if matches!(assignment.operator, AssignmentOperator::Coalesce(_)) =>
+        {
+            let combined = coalesce_assign_value(
+                resolve_rhs_with_scope(assignment.lhs, scope, ctx),
+                resolve_rhs_with_scope(assignment.rhs, scope, ctx),
+            );
+            super::array_assignment::process_array_key_write(array_access, combined, scope, ctx);
+            return;
+        }
         // `$this->regexp ??= $this->generate();` leaves the property
         // non-null just as surely as the same operator leaves a local
         // non-null, and the scope names a member path the same way it

@@ -570,7 +570,96 @@ fn normalize_type(ty: &str) -> String {
         .replace("array<mixed>", "array")
         .replace("non-empty-array<int|string, ", "non-empty-array<")
         .replace("non-empty-array<array-key, ", "non-empty-array<");
-    canonicalize_union_spelling(&drop_sequential_shape_keys(&strip_template_scopes(&result)))
+    canonicalize_union_spelling(&number_positional_shape_entries(
+        &drop_sequential_shape_keys(&strip_template_scopes(&result)),
+    ))
+}
+
+/// Give the positional entries of every `array{…}` that also spells out a
+/// key the integer key they sit at, the way PHPStan prints such a shape:
+/// `array{foo:17,'a'}` is `array{foo:17,0:'a'}`.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`], where
+/// shape entries are separated by a bare `,` and keyed as `key:value`.
+fn number_positional_shape_entries(ty: &str) -> String {
+    const OPEN: &str = "array{";
+    let Some(start) = ty.find(OPEN) else {
+        return ty.to_string();
+    };
+    let body_start = start + OPEN.len();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut body_end = None;
+    for (i, ch) in ty[body_start..].char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' if depth == 0 => {
+                body_end = Some(body_start + i);
+                break;
+            }
+            '}' | '>' | ')' | ']' => depth -= 1,
+            _ => {}
+        }
+    }
+    let Some(body_end) = body_end else {
+        return ty.to_string();
+    };
+
+    let entries: Vec<(Option<&str>, &str)> = split_top_level(&ty[body_start..body_end], ',')
+        .into_iter()
+        .map(|entry| match split_top_level(entry, ':').as_slice() {
+            [key, value] => (Some(*key), *value),
+            _ => (None, entry),
+        })
+        .collect();
+    let mixed = entries.iter().any(|(key, _)| key.is_some())
+        && entries.iter().any(|(key, _)| key.is_none());
+    let body: Vec<String> = if mixed {
+        let mut next: i64 = 0;
+        entries
+            .iter()
+            .map(|(key, value)| {
+                let value = number_positional_shape_entries(value);
+                match key {
+                    Some(key) => {
+                        if let Ok(index) = key.parse::<i64>() {
+                            next = next.max(index + 1);
+                        }
+                        format!("{key}:{value}")
+                    }
+                    None => {
+                        next += 1;
+                        format!("{}:{value}", next - 1)
+                    }
+                }
+            })
+            .collect()
+    } else {
+        entries
+            .iter()
+            .map(|(key, value)| {
+                let value = number_positional_shape_entries(value);
+                match key {
+                    Some(key) => format!("{key}:{value}"),
+                    None => value,
+                }
+            })
+            .collect()
+    };
+    format!(
+        "{}{}{}}}{}",
+        &ty[..start],
+        OPEN,
+        body.join(","),
+        number_positional_shape_entries(&ty[body_end + 1..])
+    )
 }
 
 /// Rewrite a nested `?T` (`list<array<?string>>`) to the `T|null` PHPStan
@@ -686,30 +775,7 @@ fn drop_template_bound(out: &mut String) {
 /// Split `ty` at the `|` separators that are not nested inside brackets,
 /// braces, parentheses, or quotes.
 fn split_top_level_union(ty: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    let mut start = 0;
-    for (i, ch) in ty.char_indices() {
-        if let Some(q) = quote {
-            if ch == q {
-                quote = None;
-            }
-            continue;
-        }
-        match ch {
-            '\'' | '"' => quote = Some(ch),
-            '{' | '<' | '(' | '[' => depth += 1,
-            '}' | '>' | ')' | ']' => depth -= 1,
-            '|' if depth == 0 => {
-                parts.push(&ty[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&ty[start..]);
-    parts
+    split_top_level(ty, '|')
 }
 
 /// Canonicalize spellings of the same type that PHPStan and PHPantom
@@ -881,28 +947,124 @@ fn types_match(expected: &str, actual: &str) -> bool {
         return true;
     }
 
-    // Union and intersection member order may differ: sort members and
-    // compare.
-    let sorted_members = |ty: &str| {
-        ty.split('|')
-            .map(|part| {
-                let mut members: Vec<&str> = part.split('&').collect();
-                members.sort();
-                members.join("&")
-            })
-            .collect::<Vec<_>>()
-    };
-    let ne_members = sorted_members(&ne_short);
-    let na_members = sorted_members(&na_short);
-    let mut ne_parts: Vec<&str> = ne_members.iter().map(String::as_str).collect();
-    let mut na_parts: Vec<&str> = na_members.iter().map(String::as_str).collect();
-    ne_parts.sort();
-    na_parts.sort();
-    if ne_parts == na_parts {
-        return true;
-    }
+    // Union and intersection member order may differ, at any nesting level
+    // (`list<bool|string>` against `list<string|bool>`).
+    sort_members_deep(&ne_short) == sort_members_deep(&na_short)
+}
 
-    false
+/// Split `ty` at the `sep` characters that are not nested inside brackets,
+/// braces, parentheses, or quotes.
+fn split_top_level(ty: &str, sep: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    let mut start = 0;
+    for (i, ch) in ty.char_indices() {
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        match ch {
+            '\'' | '"' => quote = Some(ch),
+            '{' | '<' | '(' | '[' => depth += 1,
+            '}' | '>' | ')' | ']' => depth -= 1,
+            _ if ch == sep && depth == 0 => {
+                parts.push(&ty[start..i]);
+                start = i + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    parts.push(&ty[start..]);
+    parts
+}
+
+/// `ty` with the members of every union and intersection in it sorted, the
+/// ones nested inside type arguments and shape entries included.
+fn sort_members_deep(ty: &str) -> String {
+    let mut members: Vec<String> = split_top_level(ty, '|')
+        .into_iter()
+        .map(|member| {
+            let mut parts: Vec<String> = split_top_level(member, '&')
+                .into_iter()
+                .map(sort_nested_members)
+                .collect();
+            parts.sort();
+            parts.join("&")
+        })
+        .collect();
+    members.sort();
+    members.join("|")
+}
+
+/// [`sort_members_deep`] applied to every argument inside the brackets of a
+/// single union member (`array<K, V>`, `array{a: V}`, `Closure(A): R`).
+/// A shape entry's key stays as written; only its value is sorted.
+fn sort_nested_members(member: &str) -> String {
+    let mut out = String::with_capacity(member.len());
+    let mut quote: Option<char> = None;
+    let mut chars = member.char_indices();
+    while let Some((i, ch)) = chars.next() {
+        out.push(ch);
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+            continue;
+        }
+        let close_char = match ch {
+            '\'' | '"' => {
+                quote = Some(ch);
+                continue;
+            }
+            '<' => '>',
+            '{' => '}',
+            '(' => ')',
+            '[' => ']',
+            _ => continue,
+        };
+        let body_start = i + 1;
+        let mut depth = 0i32;
+        let mut inner_quote: Option<char> = None;
+        let mut body_end = None;
+        for (j, c) in member[body_start..].char_indices() {
+            if let Some(q) = inner_quote {
+                if c == q {
+                    inner_quote = None;
+                }
+                continue;
+            }
+            match c {
+                '\'' | '"' => inner_quote = Some(c),
+                '{' | '<' | '(' | '[' => depth += 1,
+                _ if c == close_char && depth == 0 => {
+                    body_end = Some(body_start + j);
+                    break;
+                }
+                '}' | '>' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(body_end) = body_end else {
+            out.push_str(&member[body_start..]);
+            return out;
+        };
+        let args: Vec<String> = split_top_level(&member[body_start..body_end], ',')
+            .into_iter()
+            .map(|arg| match split_top_level(arg, ':').as_slice() {
+                [key, value] => format!("{key}:{}", sort_members_deep(value)),
+                _ => sort_members_deep(arg),
+            })
+            .collect();
+        out.push_str(&args.join(","));
+        out.push(close_char);
+        for _ in member[body_start..=body_end].chars() {
+            chars.next();
+        }
+    }
+    out
 }
 
 /// Shorten FQN components in a type string.

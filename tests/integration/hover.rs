@@ -641,7 +641,7 @@ function test(string $key): void {
 
     let slots = hover_at(&backend, uri, content, 12, 26).expect("hover on $slots");
     assert!(
-        hover_text(&slots).contains("$slots = non-empty-array<string, int>"),
+        hover_text(&slots).contains("$slots = non-empty-array<string, 1|2>"),
         "a dynamic key may land on any entry, so the shape widens: {}",
         hover_text(&slots)
     );

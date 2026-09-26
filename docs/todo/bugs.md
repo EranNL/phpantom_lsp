@@ -172,49 +172,6 @@ Writing to (or unsetting inside) an element the list already has keeps it a list
 
 Found porting PHPStan's `Rules/Methods/data/bug-12927.php`, `Rules/Variables/data/bug-14124.php` and `Rules/Variables/data/bug-14124b.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B457. `array_push()` does not change the array's type
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$result = [];
-for ($i = 0; $i < $max; $i++) {
-    array_push($result, $i);
-}
-$result; // should be list<int>, is array
-```
-
-`array_push($a, ...$values)` is `$a[] = $value` for each value, and should update the array the way the append does. `array_unshift()` is the same with the new values first.
-
-Found porting PHPStan's `Rules/Variables/data/bug-9403.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B458. An `(array)` cast of a union with a non-array member is plain `array`
-**Impact: Low · Complexity: Low**
-
-```php
-/** @var string|list<string> $var */
-(array) $var; // should be list<string>, is array
-```
-
-Casting to array is applied member by member: an array stays itself, and a scalar becomes a one-element list of it. The union of those is the result.
-
-Found porting PHPStan's `Rules/Functions/data/bug-8280.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_data/`.
-
-### B459. Writing a literal into an array offset widens it to its base type
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-$a['bla'] = 1;
-$a; // should be array{bla: 1}, is array{bla: int}
-
-$logs = [];
-$logs[$i] = '';
-$logs[$i]; // should be '', is string
-```
-
-A literal assigned to a variable keeps its literal type, but the same literal written into an array offset (a literal key on an undefined variable, or a dynamic key) is widened to its base type.
-
-Found porting PHPStan's `Analyser/Fiber/data/fnsr.php` and `Rules/Arrays/data/bug-13538.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
-
 ### B460. Array shape unions are merged differently from PHPStan
 **Impact: Low · Complexity: Medium**
 
@@ -233,18 +190,20 @@ A shape a sibling variant already covers is kept beside it as well: the passes o
 
 Found porting PHPStan's `Rules/Variables/data/bug-8113.php`, `Rules/Comparison/data/bug-7898.php`, `Rules/Methods/data/bug-5749.php` and `Rules/Arrays/data/slevomat-foreach-array-key-exists-bug.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_data/`.
 
-### B481. `??=` on an offset whose key is not a variable leaves the offset `null`
+### B483. Appending a literal to a declared array widens it to its base type
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-$totals = [];
-foreach ($items as $item) {
-    $totals[(string) $item] ??= 0;
-    $totals[(string) $item]; // should be int, is null
+/** @param non-empty-array<int> $c */
+function f(array $c) {
+    array_push($c, 19, 'baz', false);
+    $c; // should be non-empty-array<'baz'|int|false>, is non-empty-array<int|string|false>
 }
 ```
 
-With a plain variable key (`$totals[$key] ??= 0`) the read afterwards is `int`. A key that is any other expression (a cast, a call, a concatenation) is not recorded, so the read only sees the empty array the variable started as.
+A keyed write outside a loop keeps the literal it stores, and so does an append onto a tracked shape, but an append (`$c[] = 'baz'`, or `array_push()`) onto an `array<K, V>` or `list<T>` still widens the value to its base type. Loop bodies should keep widening, as keyed writes do.
+
+Found porting PHPStan's `Analyser/nsrt/array-push.php` and `array-unshift.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
 
 ## Laravel
 

@@ -17,7 +17,7 @@ use mago_syntax::cst::unary::UnaryPrefixOperator;
 use mago_syntax::cst::{Access, Expression, Variable};
 
 use crate::atom::bytes_to_str;
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
 /// One known scalar value.
@@ -207,7 +207,7 @@ pub(super) fn fold_interpolated<'b>(
 }
 
 /// The value a cast of a known scalar produces, for the casts that have
-/// one. `(object)` and `(unset)` are left to the caller.
+/// one. `(object)`, `(array)` and `(unset)` are left to the caller.
 pub(super) fn fold_cast(operator: &UnaryPrefixOperator<'_>, operand: &Scalar) -> Option<PhpType> {
     Some(match operator {
         UnaryPrefixOperator::IntCast(..) | UnaryPrefixOperator::IntegerCast(..) => {
@@ -222,14 +222,6 @@ pub(super) fn fold_cast(operator: &UnaryPrefixOperator<'_>, operand: &Scalar) ->
         UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => {
             Scalar::Bool(operand.truthiness()).into_type()
         }
-        UnaryPrefixOperator::ArrayCast(..) => match operand {
-            Scalar::Null => PhpType::array_shape(Vec::new()),
-            scalar => PhpType::array_shape(vec![ShapeEntry {
-                key: None,
-                value_type: scalar.clone().into_type(),
-                optional: false,
-            }]),
-        },
         _ => return None,
     })
 }

@@ -5,7 +5,7 @@ use super::*;
 use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
-use crate::php_type::PhpType;
+use crate::php_type::{PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 use crate::types::ResolvedType;
 
@@ -209,6 +209,98 @@ pub(crate) fn process_array_append<'b>(
         }
         _ => {}
     }
+}
+
+/// Process `array_push($var, …)` and `array_unshift($var, …)`: the values
+/// land in `$var` the way a `$var[] = …` append for each of them puts them
+/// there, in front of the existing entries for `array_unshift()`.
+///
+/// Returns whether `expr` was such a call, so the by-reference pass leaves
+/// the result alone instead of resetting `$var` to the parameter's `array`
+/// hint.
+pub(crate) fn process_array_push_call<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    use super::super::array_shape_writes::{PushedValues, apply_array_push, apply_array_unshift};
+
+    let Expression::Call(Call::Function(call)) = expr else {
+        return false;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return false;
+    };
+    let name = bytes_to_str(ident.value()).trim_start_matches('\\');
+    let unshift = if name.eq_ignore_ascii_case("array_push") {
+        false
+    } else if name.eq_ignore_ascii_case("array_unshift") {
+        true
+    } else {
+        return false;
+    };
+    let mut args = call.argument_list.arguments.iter();
+    let Some(Argument::Positional(target)) = args.next() else {
+        return false;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = target.value else {
+        return false;
+    };
+    if target.ellipsis.is_some() {
+        return false;
+    }
+    let base_name = bytes_to_str(dv.name);
+    let base_types = scope.get(base_name);
+    let base_type = if base_types.is_empty() {
+        PhpType::array()
+    } else {
+        ResolvedType::types_joined(base_types)
+    };
+    if !base_type.is_array_like() {
+        return false;
+    }
+
+    let resolve = |value: &'b Expression<'b>| {
+        let types = resolve_rhs_with_scope(value, scope, ctx);
+        if types.is_empty() {
+            PhpType::mixed()
+        } else {
+            ResolvedType::types_joined(&types)
+        }
+    };
+    let mut values = Vec::new();
+    for arg in args {
+        let Argument::Positional(arg) = arg else {
+            return false;
+        };
+        let value = resolve(arg.value);
+        if arg.ellipsis.is_none() {
+            values.push(PushedValues::One(value));
+            continue;
+        }
+        // A spread of a shape adds exactly its entries; one of anything
+        // else adds an unknown number of its elements.
+        match value.kind() {
+            TypeKind::ArrayShape(entries) if entries.iter().all(|entry| !entry.optional) => {
+                values.extend(
+                    entries
+                        .iter()
+                        .map(|entry| PushedValues::One(entry.value_type.clone())),
+                );
+            }
+            _ => values.push(PushedValues::Any(
+                value.iterable_element_type().unwrap_or_else(PhpType::mixed),
+            )),
+        }
+    }
+
+    let result = if unshift {
+        apply_array_unshift(&base_type, &values, ctx.in_loop)
+    } else {
+        apply_array_push(&base_type, &values, ctx.in_loop)
+    };
+    scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    true
 }
 
 /// Merge the value of an element write into the base variable's type.

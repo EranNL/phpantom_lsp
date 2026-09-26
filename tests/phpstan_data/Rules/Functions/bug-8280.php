@@ -11,7 +11,7 @@ function foo($var): void {}
 
 /** @var string|list<string>|null $var */
 if (null !== $var) {
-	assertType('list<string>', (array) $var); // SKIP: an (array) cast of a union with a non-array member is plain array
+	assertType('list<string>', (array) $var);
 	foo((array) $var); // should work the same as line below
 	assertType('list<string>', !is_array($var) ? [$var] : $var);
 	foo(!is_array($var) ? [$var] : $var);

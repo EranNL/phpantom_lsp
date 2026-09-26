@@ -442,6 +442,26 @@ pub(crate) fn process_pass_by_ref<'b>(
         .map(|name| (*name, scope.locals.get(&atom(name)).cloned()))
         .collect();
 
+    if !super::array_assignment::process_array_push_call(expr, scope, ctx) {
+        apply_by_ref_parameter_types(expr, scope, ctx);
+    }
+
+    for (name, before) in assigned_before {
+        let key = atom(name);
+        match before {
+            Some(types) => scope.locals.insert(key, types),
+            None => scope.locals.remove(&key),
+        };
+    }
+}
+
+/// Give the variables a call passes by reference the types its parameters
+/// declare for them.
+fn apply_by_ref_parameter_types<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
     // When a function call passes a variable to a parameter declared
     // as `Type &$param`, the variable acquires that type after the call.
     //
@@ -494,14 +514,6 @@ pub(crate) fn process_pass_by_ref<'b>(
     // `array`, `int`, `string` return empty from
     // `type_hint_to_classes_typed` and are missed.
     seed_pass_by_ref_primitives(expr, scope, ctx);
-
-    for (name, before) in assigned_before {
-        let key = atom(name);
-        match before {
-            Some(types) => scope.locals.insert(key, types),
-            None => scope.locals.remove(&key),
-        };
-    }
 }
 
 /// The call an expression statement makes, and the variables it assigns the

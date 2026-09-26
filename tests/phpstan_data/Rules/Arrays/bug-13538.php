@@ -13,7 +13,7 @@ function doFoo(array $arr, int $i, int $i2): void
 	echo $logs[$i2];
 
 	assertType("''", $logs[$i]);
-	assertType("''", $logs[$i2]); // could be mixed // SKIP: writing a literal into an array offset widens it to its base type
+	assertType("''", $logs[$i2]); // could be mixed
 
 	foreach ($arr as $value) {
 		echo $logs[$i];
@@ -32,12 +32,12 @@ function doFooBar(array $arr): void
 	$logs = [];
 	$logs[LOG_DIR] = '';
 
-	assertType("''", $logs[LOG_DIR]); // SKIP: writing a literal into an array offset widens it to its base type
+	assertType("''", $logs[LOG_DIR]);
 
 	foreach ($arr as $value) {
 		echo $logs[LOG_DIR];
 
-		assertType("''", $logs[LOG_DIR]); // SKIP: writing a literal into an array offset widens it to its base type
+		assertType("''", $logs[LOG_DIR]);
 	}
 }
 

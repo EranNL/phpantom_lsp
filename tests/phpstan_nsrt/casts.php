@@ -124,7 +124,9 @@ class Foo extends Bar
 		assertType('string|null', $cond ? (string) $str : null);
 		assertType('float|null', $cond ? (float) $str : null);
 		assertType('bool|null', $cond ? (bool) $str : null);
-		assertType('array|null', $cond ? (array) $str : null);
+		// PHPantom is more precise than PHPStan here: a string casts to the
+		// one-entry list holding it.
+		assertType('array{string}|null', $cond ? (array) $str : null);
 		// PHPantom keeps stdClass's class identity alongside the shape, since
 		// an object cast always instantiates stdClass.
 		assertType('object{scalar: string}&stdClass|null', $cond ? (object) $str : null);

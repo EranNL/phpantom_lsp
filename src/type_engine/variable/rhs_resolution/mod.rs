@@ -1480,7 +1480,7 @@ fn enclosing_function_display_name(
 ///
 /// A cast or `~` of an operand that holds one known scalar folds to the
 /// value PHP computes (`(int) '1'` is `1`, `~1` is `-2`). `resolve_operand`
-/// is always called for `(object)` and `~`, and for the other casts only
+/// is always called for `(object)`, `(array)` and `~`, and for the other casts only
 /// when `operand` is cheap to resolve (a literal, variable, or constant), so
 /// a cast of a call pays nothing for it.
 ///
@@ -1511,7 +1511,7 @@ pub(crate) fn unary_prefix_result_type(
         | UnaryPrefixOperator::DoubleCast(..)
         | UnaryPrefixOperator::RealCast(..) => PhpType::float(),
         UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..) => PhpType::bool(),
-        UnaryPrefixOperator::ArrayCast(..) => PhpType::array(),
+        UnaryPrefixOperator::ArrayCast(..) => return Some(array_cast_type(resolve_operand())),
         UnaryPrefixOperator::UnsetCast(..) => return Some(PhpType::named(atom("null"))),
         UnaryPrefixOperator::Not(_) => return Some(PhpType::bool()),
         _ => return None,
@@ -1612,6 +1612,62 @@ fn object_cast_type(operand: Vec<ResolvedType>) -> PhpType {
         }
         _ => std_class(),
     }
+}
+
+/// `(array) $expr`, applied member by member: an array stays as it is,
+/// `null` becomes `[]`, and a scalar becomes the one-entry list holding it.
+/// An object (its properties) or a value of unknown type is some array.
+fn array_cast_type(operand: Vec<ResolvedType>) -> PhpType {
+    fn cast_member(member: &PhpType, scalar: &PhpType, out: &mut Vec<PhpType>) {
+        match member.kind() {
+            TypeKind::Union(members) => {
+                for member in members.iter() {
+                    cast_member(member, scalar, out);
+                }
+            }
+            TypeKind::Nullable(inner) => {
+                cast_member(inner, scalar, out);
+                out.push(PhpType::array_shape(Vec::new()));
+            }
+            _ if member.is_null() => out.push(PhpType::array_shape(Vec::new())),
+            // `iterable` may be a `Traversable`, which casts to its
+            // properties rather than to the values it yields.
+            _ if member.is_array_like() && !member.is_named("iterable") => {
+                out.push(member.clone());
+            }
+            _ if member.is_subtype_of(scalar) => out.push(PhpType::array_shape(vec![ShapeEntry {
+                key: None,
+                value_type: member.clone(),
+                optional: false,
+            }])),
+            _ => out.push(PhpType::array()),
+        }
+    }
+
+    if operand.is_empty() {
+        return PhpType::array();
+    }
+    let scalar = PhpType::union(vec![
+        PhpType::int(),
+        PhpType::float(),
+        PhpType::string(),
+        PhpType::bool(),
+    ]);
+    let mut members = Vec::new();
+    cast_member(&ResolvedType::types_joined(&operand), &scalar, &mut members);
+    // The shape a scalar casts to adds nothing beside an array member that
+    // already holds it: `string|list<string>` casts to `list<string>`.
+    let keep: Vec<bool> = members
+        .iter()
+        .map(|member| {
+            member.shape_entries().is_none()
+                || !members
+                    .iter()
+                    .any(|other| other.shape_entries().is_none() && member.is_subtype_of(other))
+        })
+        .collect();
+    crate::util::retain_by_mask(&mut members, &keep);
+    PhpType::join_runtime_value_types(members)
 }
 
 /// Whether `(object) $expr` on this type produces an `object{scalar: T}`

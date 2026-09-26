@@ -19,7 +19,7 @@ class HelloWorld
 			array_push($result, $i);
 		}
 
-		assertType('list<int>', $result); // SKIP: array_push() does not change the array's type
+		assertType('list<int>', $result);
 		assertNativeType('list<int<0, max>>', $result);
 
 		if (!empty($result)) {

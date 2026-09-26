@@ -21,7 +21,7 @@ class Foo
 	public function doImplicitArrayCreation(): void
 	{
 		$a['bla'] = 1;
-		assertType('array{bla: 1}', $a); // SKIP: writing a literal into an array offset widens it to its base type
+		assertType('array{bla: 1}', $a);
 	}
 
 	/**
@@ -302,7 +302,7 @@ function (): void {
 
 function (): void {
 	$a['bla'] = 1;
-	assertType('array{bla: 1}', $a); // SKIP: writing a literal into an array offset widens it to its base type
+	assertType('array{bla: 1}', $a);
 };
 
 function (): void {

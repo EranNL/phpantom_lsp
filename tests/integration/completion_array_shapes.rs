@@ -4062,12 +4062,10 @@ async fn test_array_shape_incremental_key_assignments() {
                     .and_then(|i| i.detail.clone())
                     .unwrap_or_default()
             };
-            // Written in the literal, so the exact value survives; a string
-            // or int assigned afterwards widens at the mutation boundary.
-            // A boolean half does not: it names one of only two values, and
-            // widening it to `bool` would invent the other one.
+            // Written in the literal or assigned once afterwards, so the
+            // exact value survives either way.
             assert_eq!(find("key1"), "key1: 1");
-            assert_eq!(find("key2"), "key2: string");
+            assert_eq!(find("key2"), "key2: 'hello'");
             assert_eq!(find("key3"), "key3: true");
         }
         _ => panic!("Expected CompletionResponse::Array"),
@@ -4189,7 +4187,7 @@ async fn test_array_shape_incremental_override_type() {
             assert_eq!(labels[0], "status");
             // The incremental assignment overrides the initial type
             let detail = items[0].detail.as_deref().unwrap();
-            assert_eq!(detail, "status: int");
+            assert_eq!(detail, "status: 42");
         }
         _ => panic!("Expected CompletionResponse::Array"),
     }

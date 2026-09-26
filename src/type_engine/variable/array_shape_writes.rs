@@ -134,10 +134,19 @@ fn merge_nested_array_write_inner(
                 .collect(),
         );
     }
+    // A keyed write that runs once stores the exact value, the way an
+    // assignment to a variable does. One in a loop body may run any number
+    // of times with a different value each time, so only its base type is
+    // known.
+    let written = if in_loop {
+        value_type.widen_scalar_literals()
+    } else {
+        value_type.clone()
+    };
     match &keys[0] {
         ArrayWriteKey::Shape(key) => {
             if keys.len() == 1 {
-                merge_shape_key(base, key, value_type)
+                merge_shape_key(base, key, &written)
             } else {
                 let inner_base = shape_slot_base(base, key);
                 let inner_merged =
@@ -158,7 +167,7 @@ fn merge_nested_array_write_inner(
                     .or_else(|| positional_entry_index(entries, *slot))
             {
                 let inner_merged = if keys.len() == 1 {
-                    value_type.clone()
+                    written
                 } else {
                     merge_nested_array_write(
                         &entries[index].value_type,
@@ -168,7 +177,7 @@ fn merge_nested_array_write_inner(
                     )
                 };
                 let mut updated: Vec<ShapeEntry> = entries.to_vec();
-                updated[index].value_type = inner_merged.widen_scalar_literals();
+                updated[index].value_type = inner_merged;
                 updated[index].optional = false;
                 return PhpType::array_shape(updated);
             }
@@ -185,7 +194,7 @@ fn merge_nested_array_write_inner(
                 let slot_key = slot.to_string();
                 if !runtime_keys.contains(&slot_key) {
                     let inner_merged = if keys.len() == 1 {
-                        value_type.clone()
+                        written
                     } else {
                         merge_nested_array_write(
                             &PhpType::array_shape(Vec::new()),
@@ -193,8 +202,7 @@ fn merge_nested_array_write_inner(
                             value_type,
                             in_loop,
                         )
-                    }
-                    .widen_scalar_literals();
+                    };
                     if i64::try_from(*slot).ok() == next_append_index(entries) {
                         return append_to_shape(base, entries, &inner_merged);
                     }
@@ -209,12 +217,12 @@ fn merge_nested_array_write_inner(
             }
             if keys.len() == 1
                 && let Some(entries) = base.shape_entries()
-                && let Some(updated) = write_literal_keys_into_shape(entries, key_type, value_type)
+                && let Some(updated) = write_literal_keys_into_shape(entries, key_type, &written)
             {
                 return updated;
             }
             if keys.len() == 1 {
-                return merge_keyed_type(base, key_type, value_type);
+                return merge_keyed_type_inner(base, key_type, &written, true);
             }
             // The inner write started from the element type the array
             // already holds, so what it produced is that element after the
@@ -423,7 +431,7 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         } else {
             PhpType::string()
         };
-        return merge_keyed_type(base, &key_type, value_type);
+        return merge_keyed_type_inner(base, &key_type, value_type, true);
     }
 
     let mut entries: Vec<ShapeEntry> = base
@@ -432,7 +440,7 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         .unwrap_or_default();
     let written = ShapeEntry {
         key: Some(key.to_string()),
-        value_type: value_type.widen_scalar_literals(),
+        value_type: value_type.clone(),
         optional: false,
     };
     // PHP keeps an overwritten key where it was; only a new key goes on
@@ -479,7 +487,6 @@ fn write_literal_keys_into_shape(
     if !written.iter().all(|key| runtime_keys.contains(key)) {
         return None;
     }
-    let value_type = value_type.widen_scalar_literals();
     let single = written.len() == 1;
 
     let updated: Vec<ShapeEntry> = entries
@@ -531,6 +538,122 @@ fn positional_entry_index(entries: &[ShapeEntry], index: usize) -> Option<usize>
     None
 }
 
+/// One argument's worth of values an `array_push()`/`array_unshift()` call
+/// adds.
+pub(super) enum PushedValues {
+    /// A single value, which the call certainly adds.
+    One(PhpType),
+    /// Any number of values of this type, none included: the spread of an
+    /// array whose length is not known.
+    Any(PhpType),
+}
+
+/// The array `array_push($base, …$values)` leaves behind.
+///
+/// Each value is the `$base[] = $value` append it stands for, so the result
+/// is whatever that run of appends builds. `in_loop` is the flag
+/// [`merge_nested_array_write`] takes.
+pub(super) fn apply_array_push(base: &PhpType, values: &[PushedValues], in_loop: bool) -> PhpType {
+    values.iter().fold(base.clone(), |acc, value| match value {
+        PushedValues::One(value) => {
+            merge_nested_array_write(&acc, &[ArrayWriteKey::Append], value, in_loop)
+        }
+        PushedValues::Any(value) => push_any_number(&acc, value),
+    })
+}
+
+/// The array `array_unshift($base, …$values)` leaves behind.
+///
+/// A shape whose new entries are all known is rebuilt with them in front:
+/// the integer keys are renumbered from zero past the new entries, and the
+/// string keys keep their place. Anything less exact (a spread of unknown
+/// length, an optional integer key that leaves the numbering open, or a
+/// loop body the walker re-walks) folds the values into the element type,
+/// which is what prepending and appending have in common.
+pub(super) fn apply_array_unshift(
+    base: &PhpType,
+    values: &[PushedValues],
+    in_loop: bool,
+) -> PhpType {
+    if values.is_empty() {
+        return base.clone();
+    }
+    if !in_loop
+        && let TypeKind::ArrayShape(entries) = base.kind()
+        && let Some(front) = values
+            .iter()
+            .map(|value| match value {
+                PushedValues::One(value) => Some(value.clone()),
+                PushedValues::Any(_) => None,
+            })
+            .collect::<Option<Vec<_>>>()
+        && let Some(shifted) = unshift_into_shape(entries, front)
+    {
+        return if base.is_list_shape() {
+            PhpType::as_list_shape(shifted)
+        } else {
+            shifted
+        };
+    }
+    let widened = values.iter().fold(base.clone(), |acc, value| match value {
+        PushedValues::One(value) | PushedValues::Any(value) => push_any_number(&acc, value),
+    });
+    if values
+        .iter()
+        .any(|value| matches!(value, PushedValues::One(_)))
+    {
+        widened.non_empty_array_form()
+    } else {
+        widened
+    }
+}
+
+/// `entries` with `front` prepended as positional entries, or `None` when
+/// an optional integer-keyed entry leaves the renumbered keys unknowable.
+fn unshift_into_shape(entries: &[ShapeEntry], front: Vec<PhpType>) -> Option<PhpType> {
+    let mut shifted: Vec<ShapeEntry> = front
+        .into_iter()
+        .map(|value_type| ShapeEntry {
+            key: None,
+            value_type,
+            optional: false,
+        })
+        .collect();
+    for entry in entries {
+        let integer_keyed = entry.key.as_deref().is_none_or(is_decimal_int_array_key);
+        if !integer_keyed {
+            shifted.push(entry.clone());
+            continue;
+        }
+        if entry.optional {
+            return None;
+        }
+        // Every integer key is renumbered in order, so each one is the next
+        // positional entry.
+        shifted.push(ShapeEntry {
+            key: None,
+            ..entry.clone()
+        });
+    }
+    Some(PhpType::array_shape(shifted))
+}
+
+/// `base` after an unknown number of `$base[] = $value` appends, none
+/// included.
+fn push_any_number(base: &PhpType, value: &PhpType) -> PhpType {
+    let pushed = match base.kind() {
+        TypeKind::ArrayShape(entries) if entries.iter().any(|entry| entry.key.is_some()) => {
+            merge_keyed_type(base, &PhpType::int(), value)
+        }
+        _ => merge_push_type(base, value),
+    };
+    if base.is_provably_non_empty() {
+        pushed.non_empty_array_form()
+    } else {
+        pushed
+    }
+}
+
 /// Merge a push element type into an existing `PhpType` to produce
 /// a `Generic("list", …)` type.
 ///
@@ -549,6 +672,27 @@ pub(super) fn merge_push_type(base: &PhpType, value_type: &PhpType) -> PhpType {
             .is_some_and(|key| !key.is_subtype_of(&PhpType::int()))
     {
         return merge_keyed_type(base, &PhpType::int(), value_type);
+    }
+    // Neither does one declared as an array rather than a list
+    // (`array<int, T>`, `T[]`): its keys need not run `0, 1, 2, …`, and an
+    // append leaves them as they were. One that names no key type may hold
+    // any key at all.
+    let declared_key = match base.kind() {
+        TypeKind::Array(_) => Some(false),
+        TypeKind::Generic(generic)
+            if generic.name == "array" || generic.name == "non-empty-array" =>
+        {
+            Some(generic.args.len() > 1)
+        }
+        _ => None,
+    };
+    if let Some(declared_key) = declared_key {
+        let key_type = if declared_key {
+            PhpType::int()
+        } else {
+            PhpType::union(vec![PhpType::int(), PhpType::string()])
+        };
+        return merge_keyed_type(base, &key_type, value_type);
     }
 
     let mut elem_types: Vec<PhpType> = Vec::new();
@@ -624,12 +768,12 @@ pub(super) fn merge_keyed_type(
     key_type: &PhpType,
     value_type: &PhpType,
 ) -> PhpType {
-    merge_keyed_type_inner(base, key_type, value_type, true)
+    merge_keyed_type_inner(base, key_type, &value_type.widen_scalar_literals(), true)
 }
 
-/// [`merge_keyed_type`], but with `union_values` false the written value
-/// replaces the base's value type instead of joining it. The keys still
-/// join either way.
+/// [`merge_keyed_type`], but storing `value_type` as given, literals
+/// included. With `union_values` false the written value replaces the
+/// base's value type instead of joining it. The keys still join either way.
 fn merge_keyed_type_inner(
     base: &PhpType,
     key_type: &PhpType,
@@ -642,7 +786,6 @@ fn merge_keyed_type_inner(
     let existing_key = base.iterable_key_type();
     let normalized_key = normalize_array_key_type(key_type)
         .unwrap_or_else(|| PhpType::union(vec![PhpType::int(), PhpType::string()]));
-    let value_type = value_type.widen_scalar_literals();
 
     // Collect existing key types from the base.
     let mut key_types: Vec<PhpType> = Vec::new();
@@ -685,7 +828,7 @@ fn merge_keyed_type_inner(
         return PhpType::array();
     }
 
-    let val_type = join_element_types(elem_types, &value_type, existing_elem.as_ref());
+    let val_type = join_element_types(elem_types, value_type, existing_elem.as_ref());
 
     if key_types.is_empty() {
         // No key type information — use a single-param generic.
