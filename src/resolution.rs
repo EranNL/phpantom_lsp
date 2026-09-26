@@ -219,29 +219,7 @@ impl Backend {
     /// avoiding the redundant `PhpType::parse()` call that the string
     /// overload performs internally.
     pub(crate) fn find_or_load_class_typed(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
-        // Report the lookup to whoever is recording what a resolution
-        // depends on, before the memo below can answer it without touching
-        // the class index.  A name that finds nothing is reported too: it
-        // gains a declaration as readily as an existing one changes.
-        if let Some(base) = ty.base_name() {
-            crate::resolution_deps::record(base);
-        }
-        // The name search is memoised per thread on the interned type
-        // handle: the diagnostic pass asks for the same types millions of
-        // times, and every miss costs two case-insensitive hash lookups
-        // behind locks the whole worker pool shares.  Read the generation
-        // first so that a change landing mid-search retires the answer.
-        let generation = self.symbols.class_lookup_generation();
-        let mut loaded = match class_loader_memo::probe(self.symbols.id(), generation, ty) {
-            Some(memoised) => memoised?,
-            None => {
-                let found = ty
-                    .base_name()
-                    .and_then(|base| self.find_or_load_class_inner(base));
-                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
-                found?
-            }
-        };
+        let mut loaded = self.link_imported_type_aliases(self.find_indexed_class(ty)?);
         // The refinements below stay outside the memo: each depends on an
         // index of its own (the configured auth model, registered macros,
         // many-to-many targets) that keeps changing as files are indexed.
@@ -277,6 +255,75 @@ impl Backend {
         // Add pivot accessors when this class is a many-to-many target.
         loaded = self.inject_laravel_pivot(loaded);
         Some(loaded)
+    }
+
+    /// The class `ty` names as indexed, before
+    /// [`find_or_load_class_typed`](Self::find_or_load_class_typed) links
+    /// its imported type aliases and refines it.
+    fn find_indexed_class(&self, ty: &PhpType) -> Option<Arc<ClassInfo>> {
+        // Report the lookup to whoever is recording what a resolution
+        // depends on, before the memo below can answer it without touching
+        // the class index.  A name that finds nothing is reported too: it
+        // gains a declaration as readily as an existing one changes.
+        if let Some(base) = ty.base_name() {
+            crate::resolution_deps::record(base);
+        }
+        // The name search is memoised per thread on the interned type
+        // handle: the diagnostic pass asks for the same types millions of
+        // times, and every miss costs two case-insensitive hash lookups
+        // behind locks the whole worker pool shares.  Read the generation
+        // first so that a change landing mid-search retires the answer.
+        let generation = self.symbols.class_lookup_generation();
+        match class_loader_memo::probe(self.symbols.id(), generation, ty) {
+            Some(memoised) => memoised,
+            None => {
+                let found = ty
+                    .base_name()
+                    .and_then(|base| self.find_or_load_class_inner(base));
+                class_loader_memo::store(self.symbols.id(), generation, ty, &found);
+                found
+            }
+        }
+    }
+
+    /// `class` with the type aliases it imports linked into its members.
+    ///
+    /// An imported alias names a class in another file, so it cannot be
+    /// expanded when the importer is parsed the way a local alias is.  The
+    /// linked copy is cached against this very `Arc` together with the
+    /// classes the imports were read from, so that editing either one
+    /// drops it (see `evict_fqn`).
+    fn link_imported_type_aliases(&self, class: Arc<ClassInfo>) -> Arc<ClassInfo> {
+        use crate::type_engine::types::aliases;
+        if !aliases::has_imported_type_aliases(&class) {
+            return class;
+        }
+        if let Some((linked, sources)) = self.resolved_class_cache.read().get_linked_aliases(&class)
+        {
+            // Whoever is recording what this lookup depends on depends on
+            // the source classes too, cached or not.
+            for source in sources {
+                crate::resolution_deps::record(source);
+            }
+            return linked;
+        }
+        let sources = std::cell::RefCell::new(Vec::new());
+        // The source classes are loaded unlinked: linking only reads their
+        // alias definitions, and two classes may import from each other.
+        let loader = |name: &str| {
+            sources.borrow_mut().push(name.to_string());
+            self.find_indexed_class(&PhpType::parse(name))
+        };
+        let (linked, complete) = aliases::link_imported_type_aliases(&class, &loader);
+        let result = linked.map_or_else(|| Arc::clone(&class), Arc::new);
+        if complete {
+            self.resolved_class_cache.write().insert_linked_aliases(
+                &class,
+                Arc::clone(&result),
+                sources.into_inner(),
+            );
+        }
+        result
     }
 
     /// Add Laravel macro methods registered on `class` (by FQN).

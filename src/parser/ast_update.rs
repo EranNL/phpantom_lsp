@@ -1697,34 +1697,42 @@ impl Backend {
             // that forwarded params (e.g. `@use BuildsQueries<TModel>`
             // where TModel is a class-level template) remain as bare
             // names and match substitution map keys later.
+            //
+            // Type alias names are skipped too: they are expanded below,
+            // once every class's names have been qualified.
             let tpl_params: Vec<String> = class
                 .template_params
                 .iter()
                 .map(|a| a.to_string())
                 .collect();
+            let generic_arg_skip: Vec<String> = tpl_params
+                .iter()
+                .cloned()
+                .chain(all_alias_names.iter().map(|a| a.to_string()))
+                .collect();
             Self::resolve_generics_type_args(
                 &mut class.extends_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.implements_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.use_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
             Self::resolve_generics_type_args(
                 &mut class.mixin_generics,
                 use_map,
                 namespace,
-                &tpl_params,
+                &generic_arg_skip,
             );
 
             // Resolve template parameter bounds (`@template T of Bound`)
@@ -1889,6 +1897,12 @@ impl Backend {
             {
                 class.doc_members = Some(resolved);
             }
+        }
+
+        // A member signature is read from every file that uses the class,
+        // where the alias names it would no longer be in scope.
+        if !all_alias_names.is_empty() {
+            crate::type_engine::types::aliases::expand_local_type_aliases(classes);
         }
     }
 

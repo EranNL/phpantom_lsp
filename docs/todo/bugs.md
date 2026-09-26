@@ -34,52 +34,28 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B488. `isset()` on a non-numeric offset does not rule out `string`
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+/** @param list<string|array{message?: string, count?: int}> $list */
+function f(array $list) {
+    foreach ($list as $e) {
+        if (!isset($e['message'])) {
+            continue;
+        }
+        $e; // should be array{message: string, count?: int}, is string|array{message: string, count?: int}
+    }
+}
+```
+
+`isset()` narrows each array shape in the union but leaves `string` in place, although a string offset that is not an integer is never set. Reading another offset off the narrowed value then yields `string` as well, and arithmetic on it widens to `int|float`. PHPStan's own `IgnoredErrorHelper::initialize()` hits this on the entries it rebuilds from `$ignoreError['count'] ?? 1` and `$ignoreError['reportUnmatched'] ?? …`, so `IgnoredErrorHelper.php:173` is reported three times (the `index` key of the same entries is B485).
 
 ## Arithmetic
 
 No outstanding items.
 
 ## Symbol resolution
-
-### B486. A type alias on a member declared in another file is left unexpanded
-**Impact: Medium · Complexity: High**
-
-```php
-// src/Repo.php
-/**
- * @phpstan-type Row array{id: int, name: string}
- * @phpstan-type Rows list<Row>
- */
-class Repo {
-    /** @return Rows */
-    public function all(): array { return []; }
-    /** @var Row */
-    public array $current;
-}
-
-// src/Consumer.php
-function f(Repo $r) {
-    $r->all();              // should be list<array{id: int, name: string}>, is Rows
-    $r->current['name'];    // should be string, resolves to nothing
-    foreach ($r->all() as $row) {
-        $row;               // should be array{id: int, name: string}, is mixed
-    }
-}
-```
-
-Aliases are kept as bare names in member signatures and expanded only when a consumer asks, by searching the classes of the file being analysed (`resolve_type_alias_once` in `type_engine/types/resolution.rs`). Once a member's type leaves its declaring file, nothing records which class the name belongs to, so every consumer (call and property results, `foreach`, offset access, argument checks) sees an unknown name. The same code in one file works. `@phpstan-import-type` has the same problem one step further out: the importer's own file resolves it, a third file does not.
-
-A proper fix expands aliases at the point where their scope is still known, for local and imported aliases alike:
-
-- **Local aliases** can be expanded at parse time, in the pass that qualifies member types (`resolve_parent_class_names` in `parser/ast_update.rs`), where every class of the declaring file is in scope. Substitute after names are qualified, give a class's own alias precedence over another class's in the file, let a `@template` or import of the same name hide it, and expand alias bodies in dependency order with a cycle left unexpanded rather than unrolled. This was prototyped and fixes every consumer at once.
-- **Imported aliases** need the source class, which is not loadable while the importing file is parsed, and would go stale when it is edited. Link them during class resolution instead (`resolve_class_fully`), where a class loader and the dependency-evicted resolved-class cache exist, and add each import's source class to the eviction dependencies so editing it refreshes its importers. Members inherited from a parent or trait carry the parent's or trait's imports, not the child's.
-
-Both halves have to land together. With only local aliases expanded, a parameter typed by a local alias is checked against an argument that still carries the bare imported name, which is a false positive: PHPStan's own `FileAnalyser.php:259-260` is reported, passing a `LinesToIgnore` imported by `LocalIgnoresProcessorResult` to `FileAnalyserResult`'s constructor, which declares it locally.
-
-Expanding also makes argument checks run where an unexpanded name used to skip them, so it surfaces inference gaps that were hidden. On phpstan-src, `IgnoredErrorHelper.php:173` is reported three times, partly because of B485 and partly because of shape mismatches in the inferred arguments (`count: int|float` against `count?: int`, `reportUnmatched: string|bool` against `bool`) that still need to be traced. Re-run `analyze` on phpstan-src and agcms, which use aliases heavily, and triage every new diagnostic before landing.
-
-Hover on a method typed with an alias will show the expanded type rather than the alias name.
 
 ### B484. `extract()` with flags or a non-shape array leaves the locals untouched
 **Impact: Low · Complexity: Medium**

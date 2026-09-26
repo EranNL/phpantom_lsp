@@ -105,8 +105,8 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B486 | [A type alias on a member declared in another file is left unexpanded](todo/bugs.md#b486-a-type-alias-on-a-member-declared-in-another-file-is-left-unexpanded) | Medium | High |
 | B485 | [The key of a `foreach` over a list is `int`, not `int<0, max>`](todo/bugs.md#b485-the-key-of-a-foreach-over-a-list-is-int-not-int0-max) | Low-Medium | Low |
+| B488 | [`isset()` on a non-numeric offset does not rule out `string`](todo/bugs.md#b488-isset-on-a-non-numeric-offset-does-not-rule-out-string) | Low-Medium | Low-Medium |
 | B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
 | B482 | [`__PROPERTY__` inside a property hook resolves to its base type rather than its value](todo/bugs.md#b482-__property__-inside-a-property-hook-resolves-to-its-base-type-rather-than-its-value) | Low | Low |
 | B484 | [`extract()` with flags or a non-shape array leaves the locals untouched](todo/bugs.md#b484-extract-with-flags-or-a-non-shape-array-leaves-the-locals-untouched) | Low | Medium |
