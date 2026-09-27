@@ -37,6 +37,11 @@ pub(crate) fn apply_substitution_to_method(
             *default = default.substitute(subs);
         }
     }
+    // So does `@template F of E`: an argument is held to the `E` the
+    // receiver bound, not to `E`'s own bound.
+    for bound in method.template_param_bounds.values_mut() {
+        *bound = bound.substitute(subs);
+    }
     // Only copy-on-write the shared parameter list when a parameter
     // actually references a substituted name — substitution usually
     // rewrites just the return type.
@@ -248,6 +253,10 @@ pub(crate) fn method_references_params(method: &MethodInfo, template_params: &[S
             .template_param_defaults
             .iter()
             .any(|(_, d)| d.references_any_template_param(template_params))
+        || method
+            .template_param_bounds
+            .values()
+            .any(|b| b.references_any_template_param(template_params))
 }
 
 /// Whether [`apply_substitution_to_property`] would rewrite `property`'s

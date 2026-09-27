@@ -22,8 +22,8 @@ class Foo
 
 	public function doFoo()
 	{
-		assertType('iterable<array<1>>', Helper::chunk([1], 3)); // SKIP: template inference from a literal argument widens it (a literal to its base type, [] to mixed)
-		assertType('iterable<array<*NEVER*>>', Helper::chunk([], 3)); // SKIP: template inference from a literal argument widens it (a literal to its base type, [] to mixed)
+		assertType('iterable<array<1>>', Helper::chunk([1], 3));
+		assertType('iterable<array<*NEVER*>>', Helper::chunk([], 3));
 	}
 
 }

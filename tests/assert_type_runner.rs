@@ -957,7 +957,9 @@ fn drop_sequential_shape_keys(ty: &str) -> String {
 /// Compare expected (PHPStan) type with actual (PHPantom hover) type.
 /// Returns true if they match after normalization.
 fn types_match(expected: &str, actual: &str) -> bool {
-    let ne = normalize_type(expected);
+    // `*NEVER*` is how PHPStan prints the bottom type, at any nesting level
+    // (`iterable<array<*NEVER*>>`).
+    let ne = normalize_type(&expected.replace("*NEVER*", "never"));
     let na = normalize_type(actual);
 
     if ne == na {
@@ -967,11 +969,6 @@ fn types_match(expected: &str, actual: &str) -> bool {
     // `*ERROR*` is PHPStan's type for an expression it cannot resolve;
     // PHPantom's counterpart is `mixed`.
     if ne == "*ERROR*" && na == "mixed" {
-        return true;
-    }
-
-    // `*NEVER*` is how PHPStan prints the bottom type.
-    if ne == "*NEVER*" && na == "never" {
         return true;
     }
 

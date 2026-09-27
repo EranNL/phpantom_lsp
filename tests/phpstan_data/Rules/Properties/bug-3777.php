@@ -14,7 +14,7 @@ class HelloWorld
 	public function __construct()
 	{
 		$this->dates = new \SplObjectStorage();
-		assertType('SplObjectStorage<DateTimeImmutable, null>', $this->dates); // SKIP: a new object with unbound templates assigned to a property declared generic reads back with the templates' bounds
+		assertType('SplObjectStorage<DateTimeImmutable, null>', $this->dates);
 	}
 }
 
@@ -47,10 +47,10 @@ class Bar
 	public function __construct()
 	{
 		$this->foo = new Foo();
-		assertType('Bug3777\Foo<stdClass>', $this->foo); // SKIP: a new object with unbound templates assigned to a property declared generic reads back with the templates' bounds
+		assertType('Bug3777\Foo<stdClass>', $this->foo);
 
 		$this->fooo = new Fooo();
-		assertType('Bug3777\Fooo<stdClass>', $this->fooo); // SKIP: a new object with unbound templates assigned to a property declared generic reads back with the templates' bounds
+		assertType('Bug3777\Fooo<stdClass>', $this->fooo);
 	}
 
 	public function doBar()

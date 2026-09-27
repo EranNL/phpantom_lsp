@@ -20,8 +20,9 @@ use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
 use super::array_access::{class_string_inner_binding, insert_or_union};
 use super::instantiation::{
-    TemplateBindingMode, array_element_binding, candidate_binding_modes, classify_template_binding,
-    extract_array_position, extract_generic_arg_from_ancestor,
+    TemplateBindingMode, array_element_binding, candidate_binding_modes,
+    class_string_generic_binding, classify_template_binding, extract_array_position,
+    extract_generic_arg_from_ancestor,
 };
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
@@ -121,19 +122,10 @@ fn apply_template_binding_mode(
         TemplateBindingMode::ArrayElement => {
             // `@param T[] $items` — resolve individual array elements.
             if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                let inner = arg_text[1..arg_text.len() - 1].trim();
-                if inner.is_empty() {
-                    // Empty array `[]` → element type is `never`.
-                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
-                } else {
-                    let first_elem =
-                        crate::type_engine::conditional_resolution::split_text_args(inner);
-                    if let Some(elem) = first_elem.first()
-                        && let Some(resolved_type) =
-                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                    {
-                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                    }
+                if let Some(resolved_type) =
+                    crate::type_engine::call_resolution::array_literal_element_type(arg_text, rctx)
+                {
+                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
                 }
             } else if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
                 .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
@@ -152,6 +144,13 @@ fn apply_template_binding_mode(
         }
         TemplateBindingMode::ClassStringInner => {
             if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
+                insert_or_union(subs, tpl_name.to_string(), binding);
+            }
+        }
+        TemplateBindingMode::ClassStringGeneric(ref wrapper_name, tpl_position) => {
+            if let Some(binding) =
+                class_string_generic_binding(arg_text, wrapper_name, tpl_position, rctx)
+            {
                 insert_or_union(subs, tpl_name.to_string(), binding);
             }
         }
@@ -188,26 +187,11 @@ fn apply_template_binding_mode(
             if is_array_like_wrapper(wrapper_name)
                 && arg_text.starts_with('[')
                 && arg_text.ends_with(']')
+                && let Some(resolved_type) =
+                    crate::type_engine::call_resolution::array_literal_element_type(arg_text, rctx)
             {
-                let inner = arg_text[1..arg_text.len() - 1].trim();
-                if inner.is_empty() {
-                    // Empty array `[]` → element type is `never`.
-                    insert_or_union(subs, tpl_name.to_string(), PhpType::never());
-                    return;
-                } else {
-                    let elems = crate::type_engine::conditional_resolution::split_text_args(inner);
-                    // For `array<T>` (position 0 with 1 generic arg) or
-                    // `array<K, V>` (position 1 = value), infer from
-                    // element values.  For position 0 in a 2-arg generic
-                    // (the key), infer from keys if available.
-                    if let Some(elem) = elems.first()
-                        && let Some(resolved_type) =
-                            Backend::resolve_arg_text_to_type(elem.trim(), rctx)
-                    {
-                        insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                        return;
-                    }
-                }
+                insert_or_union(subs, tpl_name.to_string(), resolved_type);
+                return;
             }
             // Special case: unwrap class-string<class-string<T>> to class-string<T>
             if wrapper_name == "class-string"

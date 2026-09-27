@@ -328,7 +328,11 @@ impl Backend {
                     // Merge `@param` docblock types into parameter type
                     // hints and populate per-parameter descriptions.
                     if let Some(ref info) = info {
-                        docblock::merge_param_docblock_into_parameters(info, &mut parameters);
+                        docblock::merge_param_docblock_into_parameters(
+                            info,
+                            &mut parameters,
+                            &func_template_param_bounds,
+                        );
                     }
 
                     // A docblock `@param` merge above may have overwritten

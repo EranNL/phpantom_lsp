@@ -74,8 +74,8 @@ function stringBound(string $a)
 function (): void {
 	$a = assertType('1', mixedBound(1));
 	$a = assertType('\'str\'', mixedBound('str'));
-	$a = assertType('1', intBound(1)); // SKIP: template inference from a literal argument widens it (a literal to its base type, [] to mixed)
-	$a = assertType('\'str\'', stringBound('str')); // SKIP: template inference from a literal argument widens it (a literal to its base type, [] to mixed)
+	$a = assertType('1', intBound(1));
+	$a = assertType('\'str\'', stringBound('str'));
 };
 
 /** @template T of string */

@@ -76,8 +76,9 @@ pub(crate) use calls::{
     resolve_arg_variable_raw_type, substitute_function_templates, walker_arg_types,
 };
 pub(crate) use instantiation::{
-    TemplateBindingMode, array_element_binding, classify_template_binding, extract_array_position,
-    extract_generic_arg_from_ancestor, remap_inherited_ctor_subs, type_contains_name,
+    TemplateBindingMode, array_element_binding, class_string_generic_binding,
+    classify_template_binding, extract_array_position, extract_generic_arg_from_ancestor,
+    remap_inherited_ctor_subs, type_contains_name,
 };
 
 /// The type of a member access whose name PHP only works out at runtime.

@@ -1162,7 +1162,11 @@ impl Backend {
                     // the promoted-property logic already used for
                     // constructor parameters.
                     if let Some(ref info) = method_docblock_info {
-                        docblock::merge_param_docblock_into_parameters(info, &mut parameters);
+                        docblock::merge_param_docblock_into_parameters(
+                            info,
+                            &mut parameters,
+                            &method_template_param_bounds,
+                        );
                     }
 
                     // A docblock `@param` merge above may have overwritten

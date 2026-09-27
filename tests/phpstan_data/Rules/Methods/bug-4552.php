@@ -58,6 +58,6 @@ function instantiate($definition) {
 
 function (): void {
 	$p = present(SimpleOptionDefinition::class);
-	assertType(SimpleOptionPresenter::class, $p); // SKIP: a template nested in class-string<Foo<T>> is not inferred
+	assertType(SimpleOptionPresenter::class, $p);
 	$p->test();
 };

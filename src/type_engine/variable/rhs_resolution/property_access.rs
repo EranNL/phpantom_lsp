@@ -532,6 +532,17 @@ pub(super) fn resolve_rhs_property_access(
                     if !receiver_open && !owner.name.starts_with("__") {
                         rt.type_string = rt.type_string.replace_self_bound(&owner.fqn(), None);
                     }
+                    // The receiver's generic arguments may be what finally
+                    // lets an operator in the declaration be read
+                    // (`Data[value-of<T>]` with `T` bound to an enum case).
+                    if let Some(evaluated) =
+                        crate::type_engine::call_resolution::evaluate_constant_operands(
+                            &rt.type_string,
+                            &ctx.as_resolution_ctx(),
+                        )
+                    {
+                        rt.type_string = evaluated;
+                    }
                     if !all_resolved
                         .iter()
                         .any(|existing| existing.type_string == rt.type_string)

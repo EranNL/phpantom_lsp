@@ -13,6 +13,6 @@ use function PHPStan\Testing\assertType;
 function foo(array $bar) : array{ return is_string($bar[0]) ? [$bar] : $bar; }
 
 function(): void {
-	assertType("array{array{'foo', 'bar'}}", foo(['foo', 'bar'])); // SKIP: a conditional return type whose subject is an offset of a template (T[0]) is not evaluated
-	assertType("array{array{'foo', 'bar'}, array{'xyz', 'asd'}}", foo([['foo','bar'],['xyz','asd']])); // SKIP: a conditional return type whose subject is an offset of a template (T[0]) is not evaluated
+	assertType("array{array{'foo', 'bar'}}", foo(['foo', 'bar']));
+	assertType("array{array{'foo', 'bar'}, array{'xyz', 'asd'}}", foo([['foo','bar'],['xyz','asd']]));
 };

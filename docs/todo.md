@@ -105,15 +105,7 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B465 | [A new object with unbound templates assigned to a generic property keeps the bounds](todo/bugs.md#b465-a-new-object-with-unbound-templates-assigned-to-a-generic-property-keeps-the-bounds) | Low-Medium | Medium |
-| B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | Medium |
-| B464 | [Template inference from a literal argument widens it](todo/bugs.md#b464-template-inference-from-a-literal-argument-widens-it) | Low | Medium |
-| B466 | [A template nested in `class-string<Foo<T>>` is not inferred](todo/bugs.md#b466-a-template-nested-in-class-stringfoot-is-not-inferred) | Low | Medium |
-| B469 | [A conditional return type whose subject is an offset of a template is not evaluated](todo/bugs.md#b469-a-conditional-return-type-whose-subject-is-an-offset-of-a-template-is-not-evaluated) | Low | Medium |
-| B470 | [An offset access on a type alias is not evaluated](todo/bugs.md#b470-an-offset-access-on-a-type-alias-is-not-evaluated) | Low | Medium |
-| B480 | [An argument outside a method template's bound binds the template anyway](todo/bugs.md#b480-an-argument-outside-a-method-templates-bound-binds-the-template-anyway) | Low | Medium |
-| B472 | [A template bound through a nested callable parameter is not inferred](todo/bugs.md#b472-a-template-bound-through-a-nested-callable-parameter-is-not-inferred) | Low | Medium |
-| B468 | [A conditional return type on `$param is not null` does not pick up a template bound by a callable argument](todo/bugs.md#b468-a-conditional-return-type-on-param-is-not-null-does-not-pick-up-a-template-bound-by-a-callable-argument) | Low | Medium-High |
+| B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

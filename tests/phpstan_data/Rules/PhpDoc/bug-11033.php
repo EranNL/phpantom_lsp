@@ -41,11 +41,11 @@ enum GotoTarget: string
 function (): void {
 	/** @var GotoRoute<GotoTarget::PERSONALMANAGER> $goto */
 	$goto = new GotoRoute();
-	assertType('array{token: string}', $goto->data); // SKIP: an offset access on a type alias (Alias[K]) is not evaluated
+	assertType('array{token: string}', $goto->data);
 };
 
 function (): void {
 	/** @var GotoRoute<GotoTarget::DASHBOARD> $goto */
 	$goto = new GotoRoute();
-	assertType('null', $goto->data); // SKIP: an offset access on a type alias (Alias[K]) is not evaluated
+	assertType('null', $goto->data);
 };

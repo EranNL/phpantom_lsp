@@ -236,11 +236,15 @@ impl Backend {
                                 // literal's first element the same way
                                 // `GenericWrapper` binding does and retry
                                 // before that fallback.
+                                // The elements are widened the way a scalar
+                                // argument through such a hint is.
                                 if resolved_type.is_bare_array()
-                                    && let Some(elem) =
-                                        first_array_literal_element_type(arg_text, ctx)
-                                    && let Some(unified) =
-                                        unify_template(h, &PhpType::array_of(elem), tpl_name)
+                                    && let Some(elem) = array_literal_element_type(arg_text, ctx)
+                                    && let Some(unified) = unify_template(
+                                        h,
+                                        &PhpType::array_of(elem.widen_scalar_literals()),
+                                        tpl_name,
+                                    )
                                 {
                                     return Some(unified);
                                 }
@@ -298,9 +302,7 @@ impl Backend {
                         // bare `array` (no generics), so we must unwrap the
                         // literal and resolve the first element directly.
                         if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                            if let Some(resolved_elem) =
-                                first_array_literal_element_type(arg_text, ctx)
-                            {
+                            if let Some(resolved_elem) = array_literal_element_type(arg_text, ctx) {
                                 crate::type_engine::variable::rhs_resolution::insert_or_union(
                                     &mut subs,
                                     tpl_name.to_string(),
@@ -558,20 +560,12 @@ impl Backend {
                     // For `[1, 2, 3]`, extract the first element `1` and
                     // resolve it to `int` so that `T = int`.
                     if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                        let inner = arg_text[1..arg_text.len() - 1].trim();
-                        if !inner.is_empty() {
-                            let first_elem =
-                                crate::type_engine::types::conditional::split_text_args(inner);
-                            if let Some(elem) = first_elem.first()
-                                && let Some(resolved_type) =
-                                    Self::resolve_arg_text_to_type(elem.trim(), ctx)
-                            {
-                                crate::type_engine::variable::rhs_resolution::insert_or_union(
-                                    &mut subs,
-                                    tpl_name.to_string(),
-                                    resolved_type,
-                                );
-                            }
+                        if let Some(resolved_type) = array_literal_element_type(arg_text, ctx) {
+                            crate::type_engine::variable::rhs_resolution::insert_or_union(
+                                &mut subs,
+                                tpl_name.to_string(),
+                                resolved_type,
+                            );
                         }
                     } else if let Some(resolved_type) =
                         Self::resolve_arg_text_to_type(arg_text, ctx)
@@ -595,6 +589,22 @@ impl Backend {
                     if let Some(binding) =
                         crate::type_engine::variable::rhs_resolution::class_string_inner_binding(
                             arg_text, ctx,
+                        )
+                    {
+                        crate::type_engine::variable::rhs_resolution::insert_or_union(
+                            &mut subs,
+                            tpl_name.to_string(),
+                            binding,
+                        );
+                    }
+                }
+                TemplateBindingMode::ClassStringGeneric(ref wrapper_name, tpl_position) => {
+                    if let Some(binding) =
+                        crate::type_engine::variable::rhs_resolution::class_string_generic_binding(
+                            arg_text,
+                            wrapper_name,
+                            tpl_position,
+                            ctx,
                         )
                     {
                         crate::type_engine::variable::rhs_resolution::insert_or_union(
@@ -1288,27 +1298,57 @@ fn exclusively_bound_templates(
         .collect()
 }
 
-/// Resolve an array literal argument's first element to a type.
+/// Resolve the elements of an array literal argument to the type a template
+/// bound through them takes.
 ///
 /// `resolve_arg_text_to_type("[1, 2, 3]")` collapses the whole literal to
 /// a bare `array` with no element type, so callers that need the element
 /// type itself (binding a template through an array-like wrapper) must
-/// unwrap the literal and resolve the first element directly instead.
+/// unwrap the literal and resolve its elements directly instead.  A scalar
+/// literal element stays a literal, as a scalar argument bound directly
+/// does (`[1, 2]` binds `1|2`), and an empty literal has no element at all,
+/// so it binds `never`.
 ///
-/// Returns `None` when `arg_text` is not a `[...]` literal, or the literal
-/// is empty.
-fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+/// Returns `None` when `arg_text` is not a `[...]` literal, or an element
+/// (a spread, or an expression we cannot resolve) says nothing definite.
+pub(crate) fn array_literal_element_type(
+    arg_text: &str,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed
         .strip_prefix('[')
         .and_then(|s| s.strip_suffix(']'))?
         .trim();
     if inner.is_empty() {
-        return None;
+        return Some(PhpType::never());
     }
-    let elems = crate::type_engine::types::conditional::split_text_args(inner);
-    let elem = elems.first()?;
-    Backend::resolve_arg_text_to_type(elem.trim(), ctx)
+    let mut members: Vec<PhpType> = Vec::new();
+    for elem in crate::type_engine::types::conditional::split_text_args(inner) {
+        let elem = elem.trim();
+        if elem.is_empty() {
+            continue;
+        }
+        if elem.starts_with("...") {
+            return None;
+        }
+        let value_text = match elem.find("=>") {
+            Some(arrow_pos) => elem[arrow_pos + 2..].trim(),
+            None => elem,
+        };
+        let ty = literal_arg_type(value_text)
+            .or_else(|| Backend::resolve_arg_text_to_type(value_text, ctx))?;
+        for member in ty.union_members() {
+            if !members.contains(member) {
+                members.push(member.clone());
+            }
+        }
+    }
+    match members.len() {
+        0 => None,
+        1 => members.pop(),
+        _ => Some(PhpType::union(members)),
+    }
 }
 
 /// Build an `array{key: type, ...}` shape from an array literal argument's
@@ -1327,6 +1367,21 @@ fn first_array_literal_element_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> 
 /// `[...]`/`array(...)` literal, or none of its entries have a literal
 /// string/int key.
 pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    array_literal_shape_type_with(arg_text, &|text| {
+        Backend::resolve_arg_text_to_type(text, ctx)
+    })
+}
+
+/// [`array_literal_shape_type`] with the values that are not scalar
+/// literals resolved by `resolve_value`, for a caller that has an argument
+/// resolver rather than a resolution context.
+///
+/// A value that is itself an array literal gets a shape of its own
+/// (`[['a', 'b']]` is `array{array{'a', 'b'}}`).
+pub(crate) fn array_literal_shape_type_with(
+    arg_text: &str,
+    resolve_value: &dyn Fn(&str) -> Option<PhpType>,
+) -> Option<PhpType> {
     let trimmed = arg_text.trim();
     let inner = trimmed
         .strip_prefix('[')
@@ -1386,7 +1441,8 @@ pub(crate) fn array_literal_shape_type(arg_text: &str, ctx: &ResolutionCtx<'_>) 
                 value_text,
             )
             .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
-            .or_else(|| Backend::resolve_arg_text_to_type(value_text, ctx))
+            .or_else(|| array_literal_shape_type_with(value_text, resolve_value))
+            .or_else(|| resolve_value(value_text))
             .unwrap_or_else(PhpType::mixed);
         entries.push(crate::php_type::ShapeEntry {
             key: Some(key),
@@ -1573,11 +1629,84 @@ pub(crate) fn evaluate_constant_operands(ty: &PhpType, ctx: &ResolutionCtx<'_>) 
         return None;
     }
     let subs = constant_operand_subs(std::iter::once(ty), &[], ctx);
-    if subs.is_empty() {
+    let evaluated = if subs.is_empty() {
+        ty.clone()
+    } else {
+        ty.substitute(&subs)
+    };
+    let evaluated = if evaluated.contains_unevaluated_operator() {
+        evaluate_enum_value_of(&evaluated, ctx)
+    } else {
+        evaluated
+    };
+    (evaluated != *ty).then_some(evaluated)
+}
+
+/// Finish every `value-of<…>` in `ty` whose operand is a backed enum or one
+/// of its cases, re-evaluating the operators around it.
+///
+/// `value-of<Suit::Hearts>` is the case's backing value and `value-of<Suit>`
+/// the union of every case's, which is what a template bound to an enum
+/// case reads a shape through (`Data[value-of<T>]` with `T` bound to
+/// `Target::DASHBOARD`).  An operand that is not a backed enum, or a case
+/// with no backing value, leaves the operator standing.
+fn evaluate_enum_value_of(ty: &PhpType, ctx: &ResolutionCtx<'_>) -> PhpType {
+    if !ty.contains_unevaluated_operator() {
+        return ty.clone();
+    }
+    let recurse = |inner: &PhpType| evaluate_enum_value_of(inner, ctx);
+    match ty.kind() {
+        TypeKind::ValueOf(operand) => {
+            enum_backing_values(operand, ctx).unwrap_or_else(|| PhpType::value_of(recurse(operand)))
+        }
+        TypeKind::KeyOf(operand) => crate::php_type::evaluate_key_of(&recurse(operand)),
+        TypeKind::IndexAccess(base, index) => {
+            crate::php_type::evaluate_index_access(&recurse(base), &recurse(index))
+        }
+        _ => ty.map_children(&recurse),
+    }
+}
+
+/// The backing value of the enum case `operand` names (`Suit::Hearts`), or
+/// the union of every case's for a backed enum named by itself.
+fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<PhpType> {
+    let name: &str = match operand.kind() {
+        TypeKind::Named(name) => name,
+        TypeKind::Raw(raw) => raw,
+        _ => return None,
+    };
+    let (class_part, case) = match name.rsplit_once("::") {
+        Some((class_part, case)) => (class_part, Some(case)),
+        None => (name, None),
+    };
+    let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
+        .unwrap_or_else(|| {
+            let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
+            crate::util::resolve_source_class_name(class_part, ns, ctx.class_loader)
+        });
+    let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
+        .cloned()
+        .or_else(|| (ctx.class_loader)(&class_name))?;
+    if class.kind != crate::types::ClassLikeKind::Enum {
         return None;
     }
-    let evaluated = ty.substitute(&subs);
-    (evaluated != *ty).then_some(evaluated)
+    let mut values: Vec<PhpType> = Vec::new();
+    for constant in class.constants.iter().filter(|c| c.is_enum_case) {
+        if case.is_some_and(|case| constant.name != case) {
+            continue;
+        }
+        let value = crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(
+            constant.enum_value.as_deref()?,
+        )?;
+        if !values.contains(&value) {
+            values.push(value);
+        }
+    }
+    match values.len() {
+        0 => None,
+        1 => values.pop(),
+        _ => Some(PhpType::union(values)),
+    }
 }
 
 /// Recover a template parameter no argument names directly, from the
@@ -1679,6 +1808,7 @@ pub(crate) fn finish_template_subs(
     return_type: Option<&PhpType>,
     ctx: &ResolutionCtx<'_>,
 ) {
+    drop_bindings_outside_bounds(subs, template_params, template_param_bounds, ctx);
     propagate_bound_template_bindings(subs, template_params, template_param_bounds, ctx);
 
     let constant_subs = constant_operand_subs(
@@ -1708,6 +1838,61 @@ pub(crate) fn finish_template_subs(
 
     for (name, shape) in constant_subs {
         subs.entry(name).or_insert(shape);
+    }
+}
+
+/// Unbind every template an argument bound to a class its bound rules out.
+///
+/// `@template F of User` handed an `Article` cannot be `Article`: the call
+/// is an error, and the template falls back to the bound it fails to
+/// satisfy, which is what the call is declared to deal in (PHPStan does the
+/// same).  Only a class judged against a class bound is decided here; a
+/// class nobody can load, a bound that still names a template, or anything
+/// but a class on either side keeps its binding.
+fn drop_bindings_outside_bounds(
+    subs: &mut HashMap<String, PhpType>,
+    template_params: &[Atom],
+    template_param_bounds: &AtomMap<PhpType>,
+    ctx: &ResolutionCtx<'_>,
+) {
+    if template_param_bounds.is_empty() || subs.is_empty() {
+        return;
+    }
+    let loaded_class_names = |ty: &PhpType| -> Option<Vec<Atom>> {
+        let mut names = Vec::new();
+        for member in ty.union_members() {
+            let name = match member.kind() {
+                TypeKind::Named(name) if !crate::php_type::is_keyword_type(name) => *name,
+                TypeKind::Generic(g) if !crate::php_type::is_keyword_type(&g.name) => g.name,
+                _ => return None,
+            };
+            if template_params.contains(&name) || (ctx.class_loader)(&name).is_none() {
+                return None;
+            }
+            names.push(name);
+        }
+        Some(names)
+    };
+    for tpl_name in template_params {
+        let Some(bound) = template_param_bounds.get(tpl_name) else {
+            continue;
+        };
+        let Some(bound_to) = subs.get(tpl_name.as_str()) else {
+            continue;
+        };
+        let (Some(bound_classes), Some(bound_to_classes)) =
+            (loaded_class_names(bound), loaded_class_names(bound_to))
+        else {
+            continue;
+        };
+        let satisfies = bound_to_classes.iter().all(|sub| {
+            bound_classes
+                .iter()
+                .any(|sup| crate::class_lookup::is_subtype_of_names(sub, sup, ctx.class_loader))
+        });
+        if !satisfies {
+            subs.remove(tpl_name.as_str());
+        }
     }
 }
 
@@ -1808,8 +1993,17 @@ pub(crate) fn bind_callable_return_template(
     ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     let declared_ret = param_hint.and_then(|h| h.callable_return_type());
-    let seeds = callable_param_seeds(param_hint, bound, bindings);
-    let ret_type = Backend::infer_closure_return_type_seeded(arg_text, &seeds, ctx)?;
+    let ret_type = if crate::completion::source::helpers::is_closure_like_text(arg_text.trim()) {
+        let seeds = callable_param_seeds(param_hint, bound, bindings);
+        Backend::infer_closure_return_type_seeded(arg_text, &seeds, ctx)?
+    } else {
+        // A callable held in a variable or returned by a call has no body
+        // to read, but its own type (`callable(callable(): int): string`)
+        // still says what it returns.
+        Backend::resolve_arg_text_to_type(arg_text, ctx)?
+            .callable_return_type()?
+            .clone()
+    };
     let bound = declared_ret.and_then(|declared| unify_template(declared, &ret_type, tpl_name));
     Some(bound.unwrap_or(ret_type))
 }

@@ -228,6 +228,26 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                 return Some(resolved);
             }
 
+            // `T[0] is string` asks about an offset of what the argument
+            // binding `T` holds, which is read off that argument's type.
+            if !target.starts_with('$')
+                && target.contains('[')
+                && let Some(decided) = decide_template_offset_condition(
+                    target,
+                    condition,
+                    params,
+                    text_args,
+                    tpl,
+                    class_loader,
+                )
+            {
+                return if decided ^ *negated {
+                    resolve_branch(then_type)
+                } else {
+                    resolve_branch(else_type)
+                };
+            }
+
             // A condition keyed on a `@template` parameter (`B is 0|1`) is
             // decided by the argument that binds it (`@param B $behavior`).
             let target = if target.starts_with('$') {
@@ -938,6 +958,55 @@ pub(in crate::type_engine) fn condition_holds_for_type(
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<bool> {
     type_condition_result(arg_ty, condition, class_loader)
+}
+
+/// Decide a condition whose subject is an offset of a template parameter
+/// (`T[0] is string`), or `None` when it cannot be decided.
+///
+/// Only a template bound directly by one argument (`@param T $bar`) is read:
+/// that argument's type is what `T` stands for, and the offset is evaluated
+/// on it.  An array literal argument contributes its own shape, which is
+/// the one thing an offset can be read from.
+fn decide_template_offset_condition(
+    subject: &str,
+    condition: &PhpType,
+    params: &[ParameterInfo],
+    text_args: &str,
+    tpl: &TemplateContext<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+) -> Option<bool> {
+    let parsed = PhpType::try_parse(subject)?;
+    let TypeKind::IndexAccess(base, index) = parsed.kind() else {
+        return None;
+    };
+    let TypeKind::Named(tpl_name) = base.kind() else {
+        return None;
+    };
+    let resolver = tpl.arg_type_resolver?;
+    let param_name = tpl
+        .bindings
+        .iter()
+        .find(|(template, _)| template == tpl_name)
+        .map(|(_, param)| param)?;
+    let param_idx = params.iter().position(|p| p.name == *param_name)?;
+    let binds_directly = params[param_idx]
+        .type_hint
+        .as_ref()
+        .is_some_and(|hint| hint.unwrap_nullable().is_named(tpl_name));
+    if !binds_directly {
+        return None;
+    }
+    let args = split_text_args(text_args);
+    let bound = crate::call_args::bind_text_args_to_params(params, &args);
+    let arg_text = bound.get(param_idx)?.as_deref()?;
+    let arg_ty =
+        crate::type_engine::call_resolution::array_literal_shape_type_with(arg_text, resolver)
+            .or_else(|| resolver(arg_text))?;
+    let subject_ty = crate::php_type::evaluate_index_access(&arg_ty, index);
+    if matches!(subject_ty.kind(), TypeKind::IndexAccess(..)) {
+        return None;
+    }
+    type_condition_result(&subject_ty, condition, class_loader)
 }
 
 fn type_condition_result(

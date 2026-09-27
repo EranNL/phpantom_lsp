@@ -53,5 +53,5 @@ class Y {
 
 function (): void {
 	$y = new Y(['a' => 'y', 'b' => true, 'c' => 99, 'd' => 4.2]);
-	assertType('bool', $y->x('b')); // SKIP: an offset access on a type alias (Alias[K]) is not evaluated
+	assertType('bool', $y->x('b'));
 };

@@ -758,6 +758,21 @@ pub(crate) fn evaluate_index_access(base: &PhpType, index: &PhpType) -> PhpType 
                 }
             }
         }
+        // An int offset names an entry written with that key, or the
+        // unkeyed entry sitting at that position (`array{'a', 'b'}[1]`).
+        if let TypeKind::Literal(lit) = index.kind()
+            && let LiteralValue::Int(raw) = &**lit
+        {
+            for (position, entry) in entries.iter().enumerate() {
+                let matches = match entry.key.as_deref() {
+                    Some(key) => key == &**raw,
+                    None => position.to_string() == **raw,
+                };
+                if matches {
+                    return entry.value_type.clone();
+                }
+            }
+        }
         // If index is a union of literals, collect their value types.
         if let TypeKind::Union(members) = index.kind() {
             let mut values: Vec<PhpType> = Vec::new();

@@ -799,11 +799,16 @@ pub fn extract_param_raw_type_from_info(info: &DocblockInfo, var_name: &str) -> 
 pub(crate) fn merge_param_docblock_into_parameters(
     info: &DocblockInfo,
     parameters: &mut Vec<ParameterInfo>,
+    template_bounds: &crate::atom::AtomMap<PhpType>,
 ) {
     for param in parameters.iter_mut() {
         let param_doc_type = extract_param_raw_type_from_info(info, &param.name);
         if let Some(ref doc_type) = param_doc_type {
-            let effective = resolve_effective_type_typed(param.type_hint.as_ref(), Some(doc_type));
+            let effective = resolve_effective_type_with_template_bounds(
+                param.type_hint.as_ref(),
+                Some(doc_type),
+                template_bounds,
+            );
             if effective.is_some() {
                 param.type_hint = effective;
             }
@@ -821,7 +826,11 @@ pub(crate) fn merge_param_docblock_into_parameters(
             continue;
         }
         if let Some((None, doc_type)) = positional_tags.get(idx) {
-            let effective = resolve_effective_type_typed(param.type_hint.as_ref(), Some(doc_type));
+            let effective = resolve_effective_type_with_template_bounds(
+                param.type_hint.as_ref(),
+                Some(doc_type),
+                template_bounds,
+            );
             if effective.is_some() {
                 param.type_hint = effective;
             }
@@ -1885,6 +1894,52 @@ pub fn sanitise_and_parse_docblock_type(raw: &str) -> Option<PhpType> {
     }
 }
 
+/// [`resolve_effective_type_typed`] for a declaration that introduces its
+/// own `@template` parameters, `bounds` being their `of` bounds.
+///
+/// A template name says nothing a native hint can be compared against, but
+/// its bound does: `@template T of int` with `@param T $a` on `int $a` is
+/// the same `int` the native hint promises, narrowed to whichever `int` the
+/// call passes, so the template wins (PHPStan's `decideType` compares a
+/// template's bound the same way).  Anything the bound cannot vouch for is
+/// judged as before.
+pub fn resolve_effective_type_with_template_bounds(
+    native_type: Option<&PhpType>,
+    docblock_type: Option<&PhpType>,
+    bounds: &crate::atom::AtomMap<PhpType>,
+) -> Option<PhpType> {
+    if let (Some(native), Some(doc)) = (native_type, docblock_type)
+        && !bounds.is_empty()
+    {
+        let names: Vec<crate::atom::Atom> = bounds.keys().copied().collect();
+        if doc.references_any_name(&names) {
+            let subs: std::collections::HashMap<String, PhpType> = bounds
+                .iter()
+                .map(|(name, bound)| (name.to_string(), bound.clone()))
+                .collect();
+            let doc_owned = doc.non_null_type();
+            let doc_inner = doc_owned.as_ref().unwrap_or(doc);
+            let native_owned = native.non_null_type();
+            let native_inner = native_owned.as_ref().unwrap_or(native);
+            let resolved = doc_inner.substitute(&subs);
+            // A bound the parser could not evaluate (`key-of<Alias>`) is a
+            // refinement however it evaluates, as for the docblock itself
+            // in `should_override_type_typed`.
+            if resolved.contains_unevaluated_operator()
+                || resolved.is_subtype_of(native_inner)
+                || resolved.equivalent(native_inner)
+            {
+                return Some(if native.accepts_null() && !native.is_mixed() {
+                    doc.clone().or_null()
+                } else {
+                    doc.clone()
+                });
+            }
+        }
+    }
+    resolve_effective_type_typed(native_type, docblock_type)
+}
+
 /// Pick the best available type between a native type hint and a docblock
 /// annotation, returning a parsed [`PhpType`].
 ///
@@ -1921,7 +1976,14 @@ pub fn resolve_effective_type_typed(
                 // explicit null member, so narrowing it through a docblock
                 // is intentional and must not re-add null.
                 let doc = with_native_members_doc_omits(doc, native);
-                if native.accepts_null() && !native.is_mixed() {
+                // An operator the parser could not evaluate
+                // (`Data[value-of<T>]`) has not said yet whether its result
+                // takes the `null`; joining one now would outlive the
+                // evaluation that decides it.
+                if native.accepts_null()
+                    && !native.is_mixed()
+                    && !doc.contains_unevaluated_operator()
+                {
                     Some(doc.or_null())
                 } else {
                     Some(doc)

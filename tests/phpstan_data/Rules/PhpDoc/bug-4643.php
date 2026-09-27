@@ -56,5 +56,7 @@ class UserRepository extends Repository
 function (UserRepository $r): void {
 	assertType(User::class, $r->store(new User()));
 	assertType(Admin::class, $r->store(new Admin()));
-	assertType('F of Bug4643\User (method Bug4643\Repository::store(), parameter)', $r->store(new Article())); // should be User::class, but inheriting template tags is now broken like that // SKIP: an argument outside a method template's bound binds the template to the argument instead of the bound
+	// PHPStan leaves `F of Bug4643\User` unresolved here ("should be User::class, but
+	// inheriting template tags is now broken like that"); PHPantom falls back to the bound.
+	assertType('Bug4643\User', $r->store(new Article()));
 };

@@ -644,7 +644,14 @@ pub(crate) fn process_assignment_expr<'b>(
                     scope.invalidate_dependent_keys(&key);
                     return;
                 }
-                let rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                let mut rhs_types = resolve_rhs_with_scope(assignment.rhs, scope, ctx);
+                adopt_declared_type_args(
+                    assignment.lhs,
+                    assignment.rhs,
+                    &mut rhs_types,
+                    scope,
+                    ctx,
+                );
                 if rhs_types.is_empty() {
                     // The right-hand side did not resolve. Unlike a plain
                     // variable (`set_unknown`), a property's correct
@@ -746,6 +753,90 @@ pub(crate) fn process_assignment_expr<'b>(
         // The expression assigns nothing at its root but may still assign
         // inside itself: `return ($x = $map[$key])->truthy();`.
         process_nested_assignments(expr, scope, ctx);
+    }
+}
+
+/// Give a `new X()` stored in a property the template arguments the
+/// property declares, when the call itself bound none of them.
+///
+/// Nothing in `new \SplObjectStorage()` says what the storage will hold, so
+/// its templates fall back to their bounds (`SplObjectStorage<object,
+/// mixed>`); stored in a property declared `SplObjectStorage<DateTime,
+/// null>` it is the object that declaration describes (PHPStan infers the
+/// same).  A call that did bind a template keeps what it bound, and so does
+/// an object of a class other than the declared one.
+fn adopt_declared_type_args(
+    lhs: &Expression<'_>,
+    rhs: &Expression<'_>,
+    rhs_types: &mut [ResolvedType],
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if !matches!(
+        crate::parser::unwrap_parens(rhs),
+        Expression::Instantiation(_)
+    ) {
+        return;
+    }
+    let [rt] = rhs_types else {
+        return;
+    };
+    let Some(cls) = rt.class_info.as_ref() else {
+        return;
+    };
+    let TypeKind::Generic(created) = rt.type_string.kind() else {
+        return;
+    };
+    let unbound = cls.template_params.len() == created.args.len()
+        && cls
+            .template_params
+            .iter()
+            .zip(created.args.iter())
+            .all(|(name, arg)| {
+                let fallback = cls
+                    .template_param_defaults
+                    .get(name)
+                    .or_else(|| cls.template_param_bounds.get(name))
+                    .cloned()
+                    .unwrap_or_else(PhpType::mixed);
+                *arg == fallback
+            });
+    if !unbound {
+        return;
+    }
+    let (object, prop_name) = match lhs {
+        Expression::Access(Access::Property(pa)) => (pa.object, &pa.property),
+        Expression::Access(Access::NullSafeProperty(pa)) => (pa.object, &pa.property),
+        _ => return,
+    };
+    let ClassLikeMemberSelector::Identifier(ident) = prop_name else {
+        return;
+    };
+    let prop_name = bytes_to_str(ident.value);
+    let declared = match object {
+        Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this" => {
+            crate::inheritance::resolve_property_type_hint(
+                ctx.current_class,
+                prop_name,
+                ctx.class_loader,
+            )
+        }
+        _ => ResolvedType::into_arced_classes(resolve_rhs_with_scope(object, scope, ctx))
+            .iter()
+            .find_map(|owner| {
+                crate::inheritance::resolve_property_type_hint(owner, prop_name, ctx.class_loader)
+            }),
+    };
+    let Some(declared) = declared else {
+        return;
+    };
+    let declared = declared.non_null_type().unwrap_or(declared);
+    if let TypeKind::Generic(g) = declared.kind()
+        && g.args.len() == created.args.len()
+        && crate::util::short_name(&g.name).eq_ignore_ascii_case(&cls.name)
+        && (ctx.class_loader)(&g.name).is_some_and(|c| c.fqn() == cls.fqn())
+    {
+        rt.type_string = declared;
     }
 }
 

@@ -360,6 +360,19 @@ pub(super) fn extract_class_string_inner(resolved: &[ResolvedType]) -> Option<St
 ///
 /// For example, if `FooContainer` has `@extends Container<Foo>`, calling
 /// `extract_generic_arg_from_ancestor(FooContainer, "Container", 0, ...)` returns `Foo`.
+/// Bind a template a `class-string<Wrapper<T>>` hint names, from the class
+/// the argument names: `T` is whatever that class's `Wrapper` ancestor was
+/// given at `tpl_position`.
+pub(crate) fn class_string_generic_binding(
+    arg_text: &str,
+    wrapper_name: &str,
+    tpl_position: usize,
+    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let class = class_string_inner_binding(arg_text, rctx)?;
+    extract_generic_arg_from_ancestor(&class, wrapper_name, tpl_position, rctx)
+}
+
 pub(crate) fn extract_generic_arg_from_ancestor(
     arg_type: &PhpType,
     wrapper_name: &str,
@@ -750,6 +763,13 @@ pub(super) fn build_constructor_template_subs(
                     insert_or_union(&mut subs, tpl_name.to_string(), binding);
                 }
             }
+            TemplateBindingMode::ClassStringGeneric(ref wrapper_name, tpl_position) => {
+                if let Some(binding) =
+                    class_string_generic_binding(arg_text, wrapper_name, tpl_position, rctx)
+                {
+                    insert_or_union(&mut subs, tpl_name.to_string(), binding);
+                }
+            }
             TemplateBindingMode::GenericWrapper(wrapper_name, tpl_position) => {
                 if let Some(concrete) = Backend::try_closure_return_type_for_template(
                     arg_text,
@@ -855,6 +875,11 @@ pub(crate) enum TemplateBindingMode {
     /// `class-string<>`.  The binding is resolved by unwrapping the
     /// `class-string<>` layer from the resolved argument type.
     ClassStringInner,
+    /// `@param class-string<Wrapper<T>> $class` — the template param is a
+    /// generic argument (at the given position) of the class the
+    /// class-string names.  The binding is read off that class's ancestry,
+    /// where it implements or extends `Wrapper` with concrete arguments.
+    ClassStringGeneric(String, usize),
 }
 
 /// Classify how a template parameter name appears in a `@param` type hint.
@@ -1051,6 +1076,11 @@ pub(super) fn classify_from_php_type(tpl_name: &str, ty: &PhpType) -> TemplateBi
         TypeKind::ClassString(Some(inner)) | TypeKind::InterfaceString(Some(inner)) => {
             if inner.is_named(tpl_name) {
                 return TemplateBindingMode::ClassStringInner;
+            }
+            if let TypeKind::Generic(g) = inner.kind()
+                && let Some(position) = g.args.iter().position(|a| a.is_named(tpl_name))
+            {
+                return TemplateBindingMode::ClassStringGeneric(g.name.to_string(), position);
             }
             TemplateBindingMode::Direct
         }

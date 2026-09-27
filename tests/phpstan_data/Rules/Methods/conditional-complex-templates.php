@@ -28,6 +28,6 @@ function test(PromiseInterface $promise): void
 {
 	$passThroughBoolFn = static fn (bool $bool): bool => $bool;
 
-	assertType('ConditionalComplexTemplates\PromiseInterface<bool>', $promise->then($passThroughBoolFn)); // SKIP: a conditional return type on `$param is not null` does not pick up a template bound by a callable argument
-	assertType('ConditionalComplexTemplates\PromiseInterface<bool>', $promise->then()->then($passThroughBoolFn)); // SKIP: a conditional return type on `$param is not null` does not pick up a template bound by a callable argument
+	assertType('ConditionalComplexTemplates\PromiseInterface<bool>', $promise->then($passThroughBoolFn));
+	assertType('ConditionalComplexTemplates\PromiseInterface<bool>', $promise->then()->then($passThroughBoolFn));
 }
