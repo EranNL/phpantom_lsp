@@ -158,7 +158,6 @@ pub fn extract_template_param_bindings_from_info(
     }
 
     let mut results = Vec::new();
-    let mut bounds: Option<Vec<(String, Option<PhpType>)>> = None;
 
     for tag in info.tags_by_kind(TagKind::Param) {
         let (Some(type_text), Some(param_name)) = (tag.type_text(), tag.variable()) else {
@@ -170,29 +169,29 @@ pub fn extract_template_param_bindings_from_info(
         // generics like `Wrapper<Collection<T>, V>`.
         let parsed = PhpType::parse(&type_text);
         collect_template_bindings(&parsed, template_params, &param_name, &mut results);
+    }
 
-        // `@param T $callback` with `@template T of Closure(A): B` binds `B`
-        // from the same argument, through `T`'s bound: the closure's body
-        // has to be inferred with its parameters seeded from that
-        // signature, which unifying `T`'s bound against what `T` was
-        // already bound to (as other bounds are) cannot do.
-        if template_params.len() > 1
-            && let TypeKind::Named(name) = parsed.kind()
-            && template_params.iter().any(|t| t.as_str() == name)
-        {
-            let bounds =
-                bounds.get_or_insert_with(|| extract_template_params_with_bounds_from_info(info));
-            if let Some((_, Some(bound))) = bounds.iter().find(|(n, _)| n.as_str() == name)
-                && bound.callable_param_types().is_some()
-            {
-                let mut via_bound = Vec::new();
-                collect_template_bindings(bound, template_params, &param_name, &mut via_bound);
-                for binding in via_bound {
-                    if binding.0 != name.as_str() && !results.contains(&binding) {
-                        results.push(binding);
-                    }
-                }
+    if results.is_empty() {
+        return results;
+    }
+
+    // `@template T as (Closure(TValue): TMappedValue)` with `@param T $cb`
+    // binds `TMappedValue` from `$cb` as well, through `T`'s bound.
+    let bound_bindings: Vec<(String, String)> = extract_template_params_full_from_info(info)
+        .into_iter()
+        .filter_map(|(name, bound, ..)| Some((name, bound?)))
+        .flat_map(|(name, bound)| {
+            let mut through_bound = Vec::new();
+            for (template, param) in results.iter().filter(|(t, _)| *t == name) {
+                collect_template_bindings(&bound, template_params, param, &mut through_bound);
+                through_bound.retain(|(t, _)| t != template);
             }
+            through_bound
+        })
+        .collect();
+    for binding in bound_bindings {
+        if !results.contains(&binding) {
+            results.push(binding);
         }
     }
 

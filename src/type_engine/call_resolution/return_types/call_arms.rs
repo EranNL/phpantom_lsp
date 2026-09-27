@@ -837,8 +837,10 @@ impl Backend {
         // Find the constructor (on this class or an ancestor).
         let ancestor_arc;
         let ctor_inherited;
+        let ctor_owner: &ClassInfo;
         let ctor_ref = if let Some(c) = cls_arc.get_method("__construct") {
             ctor_inherited = false;
+            ctor_owner = &cls_arc;
             Some(c)
         } else {
             let found = crate::inheritance::ancestors(&cls_arc, ctx.class_loader)
@@ -847,10 +849,12 @@ impl Backend {
                 Some((_, arc)) => {
                     ancestor_arc = arc;
                     ctor_inherited = true;
+                    ctor_owner = &ancestor_arc;
                     ancestor_arc.get_method("__construct")
                 }
                 None => {
                     ctor_inherited = false;
+                    ctor_owner = &cls_arc;
                     None
                 }
             }
@@ -861,14 +865,12 @@ impl Backend {
         {
             let arg_texts = crate::type_engine::conditional_resolution::split_text_args(text_args);
             if !arg_texts.is_empty() {
-                // The finishing half of `build_method_template_subs`
-                // (filling a param nothing bound) is skipped here: it
-                // would fall back to the *constructor's* own
-                // `@template … of …` bound, which a constructor
-                // essentially never repeats — the bound lives on the
-                // class. `cls_arc.template_param_bounds` is used for
-                // that below instead.
-                let subs = Backend::bind_method_template_args(ctor, &arg_texts, ctx);
+                // A param nothing bound is filled from the *class's*
+                // bound below, not the constructor's: a constructor
+                // essentially never repeats `@template … of …`.
+                let subs = crate::type_engine::call_resolution::bind_constructor_template_args(
+                    ctor_owner, ctor, &arg_texts, ctx,
+                );
 
                 // Remap inherited constructor subs to the child's
                 // template param names via the @extends chain.

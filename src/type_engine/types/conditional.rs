@@ -1118,12 +1118,18 @@ fn type_condition_result(
     }
     // `is true` / `is false` name one boolean value, so only an argument
     // narrowed to a value of its own settles them: a plain `bool` really may
-    // be either.
+    // be either. A value outside `bool` altogether is neither.
     if condition.is_true() || condition.is_false() {
         if arg_ty.is_true() || arg_ty.is_false() {
             return Some(condition.is_true() == arg_ty.is_true());
         }
-        return None;
+        // A union or nullable argument is judged member by member below.
+        if !matches!(arg_ty.kind(), TypeKind::Union(_) | TypeKind::Nullable(_)) {
+            return match type_category(arg_ty) {
+                Some("bool") | None => None,
+                Some(_) => Some(false),
+            };
+        }
     }
     // Condition union (`array|string`): satisfied when any member matches,
     // refuted only when every member is refuted.

@@ -72,13 +72,15 @@ pub(crate) use arithmetic::{
 
 pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
 pub(crate) use calls::{
-    build_function_template_subs, infer_closure_literal_type, is_array_like_wrapper,
+    ArgWalkerTypes, build_function_template_subs, infer_closure_literal_type,
+    is_array_like_wrapper, resolve_arg_call_raw_type, resolve_arg_iterable_raw_type,
     resolve_arg_variable_raw_type, substitute_function_templates, walker_arg_types,
 };
 pub(crate) use instantiation::{
-    TemplateBindingMode, array_element_binding, class_string_generic_binding,
-    classify_template_binding, extract_array_position, extract_generic_arg_from_ancestor,
-    remap_inherited_ctor_subs, type_contains_name,
+    TemplateBindingMode, array_element_binding, bound_binding_hint, candidate_binding_modes,
+    class_string_generic_binding, classify_template_binding, extract_array_position,
+    extract_generic_arg_from_ancestor, extract_generic_args_from_ancestor,
+    remap_inherited_ctor_subs, resolve_array_literal_generic, type_contains_name,
 };
 
 /// The type of a member access whose name PHP only works out at runtime.

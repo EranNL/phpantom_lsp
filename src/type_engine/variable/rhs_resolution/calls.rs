@@ -18,12 +18,6 @@ use crate::type_engine::call_resolution::MethodReturnCtx;
 use crate::type_engine::resolver::{Loaders, VarResolutionCtx};
 use crate::type_engine::variable::resolution::build_var_resolver_from_ctx;
 
-use super::array_access::{class_string_inner_binding, insert_or_union};
-use super::instantiation::{
-    TemplateBindingMode, array_element_binding, candidate_binding_modes,
-    class_string_generic_binding, classify_template_binding, extract_array_position,
-    extract_generic_arg_from_ancestor,
-};
 use super::{
     extract_closure_or_arrow_return_type, resolve_rhs_expression, resolve_var_types,
     resolved_type_with_lookup,
@@ -41,198 +35,6 @@ use super::{
 /// ask the walker rather than grow a second set of expression rules.
 pub(crate) type ArgWalkerTypes<'a> = &'a dyn Fn(&str) -> Option<PhpType>;
 
-/// Apply one binding mode for `tpl_name`, recording whatever it resolves
-/// into `subs`.
-///
-/// Returns without touching `subs` when the mode cannot bind the argument
-/// it was given, which is what lets a union `@param` try its alternatives
-/// in turn (see [`candidate_binding_modes`]).
-#[allow(clippy::too_many_arguments)]
-fn apply_template_binding_mode(
-    subs: &mut HashMap<String, PhpType>,
-    binding_mode: &TemplateBindingMode,
-    tpl_name: &str,
-    arg_text: &str,
-    walker_types: Option<ArgWalkerTypes<'_>>,
-    param_hint: Option<&PhpType>,
-    bindings: &[(crate::atom::Atom, crate::atom::Atom)],
-    rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
-) {
-    // Only consulted where the text-driven resolver came back empty, so a
-    // caller that reached this through the AST pays for the walk exactly
-    // on the arguments that would otherwise bind nothing.
-    let from_walker = || walker_types.and_then(|lookup| lookup(arg_text));
-    match *binding_mode {
-        TemplateBindingMode::Direct => {
-            let bare_template = param_hint
-                .is_some_and(|h| matches!(h.kind(), TypeKind::Named(n) if &**n == tpl_name));
-            if bare_template
-                && let Some(literal) =
-                    crate::type_engine::call_resolution::literal_arg_type(arg_text.trim())
-            {
-                insert_or_union(subs, tpl_name.to_string(), literal);
-            } else if let Some(resolved_type) =
-                Backend::resolve_arg_text_to_type(arg_text, rctx).or_else(from_walker)
-            {
-                // An array-literal argument resolves only to the bare
-                // `array` keyword, which erases its own keys. Bound
-                // directly (no wrapping hint to unify against), that
-                // erased shape is all downstream `key-of<T>`/
-                // `value-of<T>` would have to work with, so build the
-                // literal's real key/value shape instead.
-                let bound_type = if resolved_type.is_bare_array() {
-                    crate::type_engine::call_resolution::array_literal_shape_type(arg_text, rctx)
-                        .unwrap_or(resolved_type)
-                } else {
-                    resolved_type
-                };
-                insert_or_union(subs, tpl_name.to_string(), bound_type);
-            }
-        }
-        TemplateBindingMode::CallableReturnType => {
-            if let Some(bound) = crate::type_engine::call_resolution::bind_callable_return_template(
-                arg_text, param_hint, tpl_name, subs, bindings, rctx,
-            ) {
-                insert_or_union(subs, tpl_name.to_string(), bound);
-            }
-        }
-        TemplateBindingMode::CallableReturnArrayPosition(position) => {
-            // `@param callable(...): array<TKey, TValue> $cb` — bind
-            // from the key/value of the callback's array-shaped
-            // return, not the whole return type.
-            if let Some(extracted) = Backend::infer_closure_return_type(arg_text, rctx)
-                .and_then(|ret_type| extract_array_position(&ret_type, position))
-            {
-                insert_or_union(subs, tpl_name.to_string(), extracted);
-            }
-        }
-        TemplateBindingMode::CallableParamType(position) => {
-            // `@param Closure(T): void $cb` — extract the closure's
-            // parameter type annotation at the given position, unless
-            // another argument already bound the template.
-            if !subs.contains_key(tpl_name)
-                && let Some(param_type) =
-                    crate::type_engine::call_resolution::bind_callable_param_template(
-                        arg_text, position, rctx,
-                    )
-            {
-                insert_or_union(subs, tpl_name.to_string(), param_type);
-            }
-        }
-        TemplateBindingMode::ArrayElement => {
-            // `@param T[] $items` — resolve individual array elements.
-            if arg_text.starts_with('[') && arg_text.ends_with(']') {
-                if let Some(resolved_type) =
-                    crate::type_engine::call_resolution::array_literal_element_type(arg_text, rctx)
-                {
-                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                }
-            } else if let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                .or_else(|| resolve_arg_call_raw_type(arg_text, rctx))
-                .or_else(from_walker)
-            {
-                // Extract the element type from array-like types
-                // so we bind T to the element, not the whole array.
-                // The call-expression fallback covers arguments whose
-                // declared return type is an array (`getConfigs()`
-                // returning `array<string, Config>`) — those carry no
-                // class info, so the general resolver yields nothing.
-                if let Some(elem_type) = array_element_binding(resolved_type) {
-                    insert_or_union(subs, tpl_name.to_string(), elem_type);
-                }
-            }
-        }
-        TemplateBindingMode::ClassStringInner => {
-            if let Some(binding) = class_string_inner_binding(arg_text, rctx) {
-                insert_or_union(subs, tpl_name.to_string(), binding);
-            }
-        }
-        TemplateBindingMode::ClassStringGeneric(ref wrapper_name, tpl_position) => {
-            if let Some(binding) =
-                class_string_generic_binding(arg_text, wrapper_name, tpl_position, rctx)
-            {
-                insert_or_union(subs, tpl_name.to_string(), binding);
-            }
-        }
-        TemplateBindingMode::GenericWrapper(ref wrapper_name, tpl_position) => {
-            // When the argument is a closure and the param hint
-            // union contains a Callable variant, try yield inference
-            // before array-like or hierarchy extraction.
-            if let Some(concrete) = Backend::try_closure_return_type_for_template(
-                arg_text,
-                tpl_name,
-                tpl_position,
-                param_hint,
-                rctx,
-            ) {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-                return;
-            }
-            // For `@param array<TKey, TValue> $value`, resolve the
-            // argument's raw iterable type — from a variable's
-            // annotations/assignments (`$users` as `array<int, User>`)
-            // or from a call expression's declared return type
-            // (`$this->getUsers()` returning `array<int, User>`) —
-            // and extract the positional generic argument.
-            if is_array_like_wrapper(wrapper_name)
-                && let Some(resolved) =
-                    resolve_arg_iterable_raw_type(arg_text, rctx).or_else(from_walker)
-                && let Some(concrete) = extract_array_type_at_position(&resolved, tpl_position)
-            {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-                return;
-            }
-            // Array literal argument for array-like wrappers:
-            // `[1, 2, 3]` for `@param array<T>` → infer T from elements.
-            if is_array_like_wrapper(wrapper_name)
-                && arg_text.starts_with('[')
-                && arg_text.ends_with(']')
-                && let Some(resolved_type) =
-                    crate::type_engine::call_resolution::array_literal_element_type(arg_text, rctx)
-            {
-                insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                return;
-            }
-            // Special case: unwrap class-string<class-string<T>> to class-string<T>
-            if wrapper_name == "class-string"
-                && tpl_position == 0
-                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-            {
-                if let Some(inner) = resolved_type.unwrap_class_string_inner() {
-                    insert_or_union(subs, tpl_name.to_string(), inner.clone());
-                } else {
-                    insert_or_union(subs, tpl_name.to_string(), resolved_type);
-                }
-            }
-            // ── Class generic wrapper resolution ────────────────
-            // For `@param Container<TItem> $c` where the argument
-            // is a subclass like `FooContainer extends Container<Foo>`,
-            // resolve the argument type and walk its @extends chain
-            // to find the wrapper class's generic arg at the right
-            // position.
-            if !is_array_like_wrapper(wrapper_name)
-                && wrapper_name != "class-string"
-                && let Some(resolved_type) = Backend::resolve_arg_text_to_type(arg_text, rctx)
-                && let Some(concrete) = extract_generic_arg_from_ancestor(
-                    &resolved_type,
-                    wrapper_name,
-                    tpl_position,
-                    rctx,
-                )
-            {
-                insert_or_union(subs, tpl_name.to_string(), concrete);
-            }
-            // When array-type extraction fails (e.g. bare `array`
-            // property without generic annotation), do NOT fall back
-            // to a Direct resolve — that would bind the template
-            // param to the whole argument type instead of its
-            // positional generic arg.  Leave it unbound so the
-            // "fill in unbound" code below maps it to its declared
-            // upper bound or `mixed`.
-        }
-    }
-}
-
 /// Build a template substitution map for a function-level `@template` call.
 ///
 /// Uses the function's `template_bindings` to match template parameters to
@@ -242,125 +44,26 @@ fn apply_template_binding_mode(
 ///   - Generic wrapper: `@param array<TKey, TValue> $v` + `func($users)` →
 ///     positional resolution through the wrapper's generic arguments.
 ///
-/// Every binding site unions into the substitution rather than
-/// overwriting it, so a template bound from several parameters resolves
-/// to what all of its arguments have in common: `@param T[] $a, T[] $b`
-/// with `combine([1], ['x'])` binds `T` to `int|string`.  Letting the
-/// last binding site win would leave every other argument measured
-/// against a type taken from one of its siblings.
+/// The binding itself is [`bind_template_args`](crate::type_engine::call_resolution::bind_template_args),
+/// shared with methods and constructors.
 pub(crate) fn build_function_template_subs(
     func_info: &crate::types::FunctionInfo,
     arg_texts: &[String],
     walker_types: Option<ArgWalkerTypes<'_>>,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> HashMap<String, PhpType> {
-    let mut subs = HashMap::new();
-
-    // Bind the raw source-order argument texts to parameters by PHP's rules
-    // so a named argument (`id: Foo::class`) is routed to the parameter it
-    // targets rather than its ordinal slot, and its `name:` prefix is
-    // stripped off the value.
     let arg_refs: Vec<&str> = arg_texts.iter().map(|s| s.as_str()).collect();
-    let bound = crate::call_args::bind_text_args_to_params(&func_info.parameters, &arg_refs);
-
-    for (tpl_name, param_name) in crate::type_engine::call_resolution::callable_bindings_last(
-        &func_info.template_bindings,
-        &func_info.parameters,
-    ) {
-        let param_idx = match func_info
-            .parameters
-            .iter()
-            .position(|p| p.name == param_name.as_str())
-        {
-            Some(idx) => idx,
-            None => continue,
-        };
-
-        let provided_arg = bound.get(param_idx).and_then(|o| o.as_deref());
-
-        // Determine the binding mode by inspecting the parameter's
-        // docblock type hint.  The type hint tells us how the template
-        // param is embedded in the `@param` annotation.
-        let param_hint = crate::type_engine::call_resolution::hint_through_template_bound(
-            tpl_name,
-            func_info
-                .parameters
-                .get(param_idx)
-                .and_then(|p| p.type_hint.as_ref()),
-            &func_info.template_param_bounds,
-        );
-        let binding_mode = classify_template_binding(tpl_name, param_hint);
-
-        // Fall back to the parameter's default value only for binding
-        // modes where the default is meaningful (class-string<T> with
-        // a `Foo::class` default, or direct bindings with `::class`).
-        let default_value = func_info
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.default_value.as_deref());
-        let tpl_bound = func_info
-            .template_param_bounds
-            .get(&crate::atom::atom(tpl_name));
-        let arg_text: &str = match provided_arg {
-            Some(text) => text,
-            // A template bounded by a type operator resolves against the
-            // one literal it binds to, and an omitted argument has such a
-            // literal whenever the parameter declares a scalar default —
-            // known at the declaration site exactly as an explicit
-            // argument is known at the call site.
-            None => match default_value {
-                Some(d)
-                    if crate::type_engine::call_resolution::type_operator_bound_literal(
-                        tpl_bound, d,
-                    )
-                    .is_some() =>
-                {
-                    d
-                }
-                _ => match &binding_mode {
-                    TemplateBindingMode::ClassStringInner => match default_value {
-                        Some(d) => d,
-                        None => continue,
-                    },
-                    TemplateBindingMode::Direct => match default_value {
-                        Some(d) if d.ends_with("::class") => d,
-                        _ => continue,
-                    },
-                    _ => continue,
-                },
-            },
-        };
-
-        if let Some(literal) =
-            crate::type_engine::call_resolution::type_operator_bound_literal(tpl_bound, arg_text)
-        {
-            insert_or_union(&mut subs, tpl_name.to_string(), literal);
-            continue;
-        }
-
-        // A union `@param` names one binding site per alternative
-        // (`Collection<TKey, TValue>|array<TKey, TValue>`), and the one the
-        // argument's own shape matches is the one that should bind. Try
-        // them in order and stop at the first that resolves; a non-union
-        // hint yields a single mode, which is the path every other
-        // parameter takes.
-        let before = subs.get(tpl_name.as_str()).cloned();
-        for mode in candidate_binding_modes(tpl_name, param_hint) {
-            apply_template_binding_mode(
-                &mut subs,
-                &mode,
-                tpl_name,
-                arg_text,
-                walker_types,
-                param_hint,
-                &func_info.template_bindings,
-                rctx,
-            );
-            if subs.get(tpl_name.as_str()) != before.as_ref() {
-                break;
-            }
-        }
-    }
+    let callee = crate::type_engine::call_resolution::TemplateCallee {
+        parameters: &func_info.parameters,
+        template_bindings: &func_info.template_bindings,
+        template_param_bounds: &func_info.template_param_bounds,
+    };
+    let mut subs = crate::type_engine::call_resolution::bind_template_args(
+        &callee,
+        &arg_refs,
+        walker_types,
+        rctx,
+    );
 
     crate::type_engine::call_resolution::finish_template_subs(
         &mut subs,
@@ -576,7 +279,7 @@ pub(crate) fn resolve_arg_variable_raw_type(
 /// method-level template substitutions apply to the returned type.
 /// Returns `None` when the text is not a call expression or the callee
 /// has no declared return type.
-pub(super) fn resolve_arg_call_raw_type(
+pub(crate) fn resolve_arg_call_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -610,7 +313,7 @@ pub(super) fn resolve_arg_call_raw_type(
 /// an element read out of another array goes through
 /// [`resolve_arg_dim_raw_type`].  Anything left over is handed to the
 /// general argument resolver.
-pub(super) fn resolve_arg_iterable_raw_type(
+pub(crate) fn resolve_arg_iterable_raw_type(
     arg_text: &str,
     rctx: &crate::type_engine::resolver::ResolutionCtx<'_>,
 ) -> Option<PhpType> {
@@ -655,30 +358,6 @@ fn resolve_arg_dim_raw_type(
         .shape_value_type(literal_key)
         .cloned()
         .or_else(|| base_type.extract_value_type(false).cloned())
-}
-
-/// Extract the concrete type at `position` from an array type string.
-///
-/// For array types with two generic parameters (key + value):
-/// - `array<int, User>` at position 0 → `"int"`, position 1 → `"User"`
-/// - `User[]` at position 0 → nothing, position 1 → `"User"`
-/// - `list<User>` at position 0 → `"int"`, position 1 → `"User"`
-/// - `array{a: int, b: int}` at position 0 → `"string"`, position 1 → `"int"`
-///
-/// For single-param forms:
-/// - `array<User>` at position 0 → `"User"`
-pub(super) fn extract_array_type_at_position(ty: &PhpType, position: usize) -> Option<PhpType> {
-    match position {
-        // Only the types that actually pin their keys down answer here: a
-        // `list<V>` and an `array{…}` shape name no key argument but are
-        // not silent about their keys, while `array<V>`, `V[]` and a bare
-        // `array` are. Leaving the open ones unbound is what lets `TKey`
-        // fall back to the `array-key` its declaration already promises,
-        // rather than inventing the `int` a sequential array would have.
-        0 => crate::type_engine::variable::array_func_rules::array_key_domain(ty),
-        1 => ty.extract_value_type(false).cloned(),
-        _ => None,
-    }
 }
 
 /// Whether a wrapper type name should be treated as array-like for
