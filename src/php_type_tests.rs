@@ -940,6 +940,31 @@ fn join_shapes_key_order_is_first_side_then_new_keys() {
 }
 
 #[test]
+fn union_folds_a_shape_wholly_covered_by_another_member() {
+    // `array{mixed}` names the same one-entry array `array{0: mixed, 1?:
+    // string|null}` already allows when key `1` is absent, so the union
+    // is just the wider shape.
+    assert_eq!(
+        PhpType::parse("array{mixed}|array{0: mixed, 1?: string|null}"),
+        PhpType::parse("array{0: mixed, 1?: string|null}")
+    );
+    // Order does not matter.
+    assert_eq!(
+        PhpType::parse("array{0: mixed, 1?: string|null}|array{mixed}"),
+        PhpType::parse("array{0: mixed, 1?: string|null}")
+    );
+}
+
+#[test]
+fn union_keeps_shapes_that_only_subtype_rather_than_match_exactly() {
+    // A literal value is a subtype of its base type, but the two shapes
+    // are not the same array: folding on subtype containment alone would
+    // drop the more precise literal-tuple alternative.
+    let union = PhpType::parse("list{'a', bool}|array{string, bool}");
+    assert_eq!(union.union_members().len(), 2);
+}
+
+#[test]
 fn object_shape_property_type_test() {
     let ty = PhpType::parse("object{name: string, user: User}");
     assert_eq!(

@@ -106,7 +106,7 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B512 | [A call whose argument is `*NEVER*` still has its declared return type](todo/bugs.md#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type) | Low | Low-Medium |
-| B511 | [A union of shapes is not folded when one alternative covers another](todo/bugs.md#b511-a-union-of-shapes-is-not-folded-when-one-alternative-covers-another) | Low | Medium |
+| B514 | [`join_shapes` refuses a shape with a positional entry even when the other side anchors it](todo/bugs.md#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it) | Low | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

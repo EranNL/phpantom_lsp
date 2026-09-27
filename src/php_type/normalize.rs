@@ -59,6 +59,7 @@ impl PhpType {
                 simplify_bool_union(&mut simplified);
                 absorb_scalar_refinements(&mut simplified);
                 absorb_subsumed_intersections(&mut simplified);
+                absorb_subsumed_shapes(&mut simplified);
 
                 if simplified.len() == 1 {
                     return simplified.into_iter().next().unwrap();
@@ -1165,6 +1166,94 @@ pub(crate) fn absorb_subsumed_intersections(types: &mut Vec<PhpType>) {
         .collect();
 
     crate::util::retain_by_mask(types, &keep);
+}
+
+/// Drop a union member array shape wholly covered by another shape member:
+/// `array{mixed}|array{0: mixed, 1?: string|null}` → the latter alone,
+/// since every array `array{mixed}` describes (a single entry at key `0`)
+/// is one the wider shape also describes (key `0` required, key `1`
+/// optional).
+///
+/// Unlike [`is_runtime_value_subtype`], which a branch join uses to drop a
+/// value a sibling branch's type already covers, this requires an *exact*
+/// value match at each shared key rather than mere containment. A plain
+/// union is not a branch join: `list{'a', bool}|array{string, bool}` names
+/// two alternatives on purpose (a literal-tuple form and a widened one),
+/// and folding on containment alone would drop the more precise
+/// alternative just because its values happen to be subtypes of the
+/// other's.
+pub(crate) fn absorb_subsumed_shapes(types: &mut Vec<PhpType>) {
+    if types.len() < 2
+        || !types
+            .iter()
+            .any(|t| matches!(t.kind(), TypeKind::ArrayShape(_)))
+    {
+        return;
+    }
+
+    let keep: Vec<bool> = types
+        .iter()
+        .enumerate()
+        .map(|(index, ty)| {
+            let TypeKind::ArrayShape(entries) = ty.kind() else {
+                return true;
+            };
+            !types.iter().enumerate().any(|(other_index, other)| {
+                other_index != index
+                    && matches!(other.kind(), TypeKind::ArrayShape(_))
+                    && shape_exactly_contained_in(entries, ty.is_list_shape(), other)
+                    && (!shape_exactly_contained_in_reverse(other, ty) || other_index < index)
+            })
+        })
+        .collect();
+
+    crate::util::retain_by_mask(types, &keep);
+}
+
+/// [`shape_exactly_contained_in`] with the arguments the other way round,
+/// for the mutual-containment tie-break in [`absorb_subsumed_shapes`].
+fn shape_exactly_contained_in_reverse(narrower: &PhpType, wider: &PhpType) -> bool {
+    let TypeKind::ArrayShape(entries) = narrower.kind() else {
+        return false;
+    };
+    shape_exactly_contained_in(entries, narrower.is_list_shape(), wider)
+}
+
+/// Whether every array an `array{…}` shape with `entries` describes is also
+/// one `supertype` describes, the same structural check
+/// [`shape_values_contained_in`] makes, but requiring each shared key's
+/// value type to match exactly rather than merely fit by subtype
+/// containment. See [`absorb_subsumed_shapes`] for why the weaker
+/// containment check is wrong for a plain union.
+fn shape_exactly_contained_in(entries: &[ShapeEntry], is_list: bool, supertype: &PhpType) -> bool {
+    let TypeKind::ArrayShape(wider) = supertype.kind() else {
+        return false;
+    };
+    if supertype.is_list_shape() && !is_list {
+        return false;
+    }
+    let Some(keys) = runtime_shape_keys(entries) else {
+        return false;
+    };
+    let Some(wider_keys) = runtime_shape_keys(wider) else {
+        return false;
+    };
+    let value_fits =
+        |value: &PhpType, wider: &PhpType| wider.is_mixed() || equivalent_for_dedup(value, wider);
+    let covered = entries.iter().zip(&keys).all(|(entry, key)| {
+        wider_keys
+            .iter()
+            .position(|wider_key| wider_key == key)
+            .is_some_and(|index| {
+                (!entry.optional || wider[index].optional)
+                    && value_fits(&entry.value_type, &wider[index].value_type)
+            })
+    });
+    covered
+        && wider
+            .iter()
+            .zip(&wider_keys)
+            .all(|(entry, key)| entry.optional || keys.contains(key))
 }
 
 /// Absorb scalar refinements into their parent types.

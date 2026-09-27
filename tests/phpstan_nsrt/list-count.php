@@ -253,7 +253,7 @@ class CountWithOptionalKeys
 		if (count($row) === 0) {
 			assertType('*NEVER*', $row);
 		} else {
-			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: a union of shapes is not folded when one alternative covers another
+			assertType('array{0: mixed, 1?: string|null}', $row);
 		}
 
 		if (count($row) === 1) {
@@ -271,7 +271,7 @@ class CountWithOptionalKeys
 		if (count($row) === 3) {
 			assertType('*NEVER*', $row);
 		} else {
-			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: a union of shapes is not folded when one alternative covers another
+			assertType('array{0: mixed, 1?: string|null}', $row);
 		}
 	}
 

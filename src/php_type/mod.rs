@@ -909,6 +909,10 @@ impl PhpType {
         if normalize::absorb_non_empty_refinements(&mut members) && members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
+        normalize::absorb_subsumed_shapes(&mut members);
+        if members.len() == 1 {
+            return members.into_iter().next().unwrap();
+        }
         if normalize::has_duplicate_members(&members) {
             normalize::dedup_types(&mut members);
             if members.len() == 1 {
