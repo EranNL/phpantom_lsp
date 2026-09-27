@@ -394,16 +394,4 @@ Found porting PHPStan's `nsrt/conditional-types.php`; the assertion is `// SKIP`
 
 ## Miscellaneous
 
-### B498. A variable first introduced by a by-reference closure `use` is not typed `null`
-**Impact: Low · Complexity: Low**
-
-```php
-$callback = function () use (&$untouched) {
-    $untouched; // should be null, has no type
-};
-$untouched;     // should be null, has no type
-```
-
-Capturing an undefined variable by reference creates it, as `null`, in both scopes.
-
-Found porting PHPStan's `nsrt/closure-passed-by-reference.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.

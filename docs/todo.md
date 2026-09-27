@@ -110,7 +110,6 @@ unlikely to move the needle for most users.
 | B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
 | B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
 | B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
-| B498 | [A variable first introduced by a by-reference closure `use` is not typed `null`](todo/bugs.md#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null) | Low | Low |
 | B503 | [A conditional on a name that is not a parameter picks the else branch](todo/bugs.md#b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch) | Low | Low |
 | B482 | [Key functions widen the literal keys of an array literal](todo/bugs.md#b482-key-functions-widen-the-literal-keys-of-an-array-literal) | Low | Low-Medium |
 | B488 | [A call proved through `?->` stays narrowed under its `->` spelling when the method is impure](todo/bugs.md#b488-a-call-proved-through---stays-narrowed-under-its---spelling-when-the-method-is-impure) | Low | Low-Medium |

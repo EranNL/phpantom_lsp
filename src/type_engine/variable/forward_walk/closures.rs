@@ -177,6 +177,14 @@ pub(crate) fn seed_closure_captures(
             closure_scope.set(&var_name, from_outer.to_vec());
         } else if outer.contains(&var_name) {
             closure_scope.set_empty(&var_name);
+        } else if use_var.ampersand.is_some() {
+            // Capturing an undefined variable by reference auto-vivifies
+            // it as `null` in the defining scope, so the closure starts
+            // out seeing that value too.
+            closure_scope.set(
+                &var_name,
+                vec![ResolvedType::from_type_string(PhpType::null())],
+            );
         }
         carry_paths_through(&var_name, closure_scope);
     }

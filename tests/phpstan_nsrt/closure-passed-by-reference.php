@@ -17,7 +17,7 @@ function () {
 	$callback = function () use (&$progressStarted, $anotherVariable, &$untouchedPassedByRef, &$incrementedInside, &$fooOrNull): void {
 		assertType('1|bool', $progressStarted);
 		assertType('false', $anotherVariable);
-		assertType('null', $untouchedPassedByRef); // SKIP: a variable first introduced by a by-reference closure use is not typed null
+		assertType('null', $untouchedPassedByRef);
 		assertType('ClosurePassedByReference\Foo|null', $fooOrNull);
 		if (doFoo()) {
 			$progressStarted = 1;
@@ -47,7 +47,7 @@ function () {
 
 	assertType('false', $anotherVariable);
 
-	assertType('null', $untouchedPassedByRef); // SKIP: a variable first introduced by a by-reference closure use is not typed null
+	assertType('null', $untouchedPassedByRef);
 
 
 	assertType('ClosurePassedByReference\Foo|null', $fooOrNull);
