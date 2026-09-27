@@ -361,6 +361,72 @@ pub(crate) fn process_array_cursor_call<'b>(
     true
 }
 
+/// Process the calls that sort an array in place.
+///
+/// Sorting reorders the entries without changing which values the array
+/// holds, so the argument keeps its value type and, when it had none,
+/// stays empty. The sorts that keep keys (`asort()`, `ksort()`, …) leave
+/// the type alone; the ones that renumber (`sort()`, `usort()`,
+/// `shuffle()`, …) make it a list of the same values.
+///
+/// Returns whether `expr` was handled, so the by-reference pass does not
+/// reset the variable to the parameter's bare `array` hint.
+pub(crate) fn process_array_sort_call(expr: &Expression<'_>, scope: &mut ScopeState) -> bool {
+    const RENUMBERING: [&str; 4] = ["sort", "rsort", "usort", "shuffle"];
+    const KEY_PRESERVING: [&str; 8] = [
+        "asort",
+        "arsort",
+        "ksort",
+        "krsort",
+        "uasort",
+        "uksort",
+        "natsort",
+        "natcasesort",
+    ];
+    let Some((name, call)) = called_function(expr) else {
+        return false;
+    };
+    let renumbers = if RENUMBERING.iter().any(|f| f.eq_ignore_ascii_case(name)) {
+        true
+    } else if KEY_PRESERVING.iter().any(|f| f.eq_ignore_ascii_case(name)) {
+        false
+    } else {
+        return false;
+    };
+    let Some(Argument::Positional(target)) = call.argument_list.arguments.first() else {
+        return false;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = target.value else {
+        return false;
+    };
+    if target.ellipsis.is_some() {
+        return false;
+    }
+    let base_name = bytes_to_str(dv.name);
+    let base_types = scope.get(base_name);
+    if base_types.is_empty() {
+        return false;
+    }
+    let base_type = ResolvedType::types_joined(base_types);
+    if !base_type.is_array_like() {
+        return false;
+    }
+    if !renumbers || base_type.is_empty_array_shape() {
+        return true;
+    }
+    let Some(value) = base_type.iterable_element_type() else {
+        return false;
+    };
+    let list = PhpType::list(value);
+    let result = if base_type.is_provably_non_empty() {
+        list.non_empty_array_form()
+    } else {
+        list
+    };
+    scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    true
+}
+
 /// Whether `expr` calls `reset()`, `end()`, `next()` or `prev()`, which
 /// take their array by reference only to move its internal pointer.
 pub(crate) fn is_array_pointer_call(expr: &Expression<'_>) -> bool {

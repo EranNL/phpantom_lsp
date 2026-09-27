@@ -863,7 +863,7 @@ namespace PsalmTest_array_assignment_61 {
 
     $a += ["e" => new RuntimeException()];
 
-    assertType('array{c: RuntimeException, e: RuntimeException}', $a); // SKIP: array_map over a shape loses the shape
+    assertType('array{c: RuntimeException, e: RuntimeException}', $a);
 }
 
 // Test: unpackEmptyArrayIsEmpty

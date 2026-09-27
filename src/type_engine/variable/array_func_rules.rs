@@ -247,7 +247,11 @@ pub(in crate::type_engine) fn array_func_raw_type(
     // array_map: callback is first arg, array is second.
     // The callback's return type determines the output element type.
     if func_name.eq_ignore_ascii_case("array_map") {
-        let element = array_map_element_type(args)?.widen_scalar_literals();
+        if let Some(mapped) = array_map_shape(args) {
+            return Some(mapped);
+        }
+        let seed = args.arg_raw_type(1).and_then(|t| t.iterable_element_type());
+        let element = array_map_value(array_map_element_type(args, seed)?);
         return Some(array_map_container(element, args));
     }
 
@@ -1057,6 +1061,53 @@ fn array_map_container(element: PhpType, args: &dyn ArrayFuncArgs) -> PhpType {
     }
 }
 
+/// `array_map` over a single shape: every key survives and each value
+/// becomes what the callback returns for it, so `array{c: string}` maps to
+/// `array{c: T}` and a `list{…}` keeps its arity.
+///
+/// Entries whose values widen to the same type share one callback
+/// inference, so a long homogeneous literal costs no more than a list.
+fn array_map_shape(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+    if args.has_arg(2) || args.is_spread(1) {
+        return None;
+    }
+    let input = args.arg_raw_type(1)?;
+    let TypeKind::ArrayShape(entries) = input.kind() else {
+        return None;
+    };
+    let mut mapped_by_seed: Vec<(PhpType, PhpType)> = Vec::new();
+    let mut mapped = Vec::with_capacity(entries.len());
+    for entry in entries.iter() {
+        let seed = entry.value_type.widen_scalar_literals();
+        let value = match mapped_by_seed.iter().find(|(s, _)| *s == seed) {
+            Some((_, value)) => value.clone(),
+            None => {
+                let value = array_map_value(array_map_element_type(args, Some(seed.clone()))?);
+                mapped_by_seed.push((seed, value.clone()));
+                value
+            }
+        };
+        mapped.push(ShapeEntry {
+            value_type: value,
+            ..entry.clone()
+        });
+    }
+    Some(if matches!(input.raw_kind(), TypeKind::ListShape(_)) {
+        PhpType::list_shape(mapped)
+    } else {
+        PhpType::array_shape(mapped)
+    })
+}
+
+/// A callback result as the value `array_map` stores: literals widened,
+/// and a `void` callback's missing return read as the `null` it produces.
+fn array_map_value(result: PhpType) -> PhpType {
+    if result.is_void() {
+        return PhpType::null();
+    }
+    result.widen_scalar_literals()
+}
+
 /// Whether `ty` promises the sequential integer keys a `list` has.
 fn is_list_type(ty: &PhpType) -> bool {
     match ty.raw_kind() {
@@ -1240,25 +1291,40 @@ fn filter_key_param_index(args: &dyn ArrayFuncArgs) -> Option<usize> {
 ///    returns the `ExtendedMethodReflection` the body hands back).
 /// 2. Otherwise infer it from the callback body, with the callback's
 ///    first parameter seeded to the input array's element type.
-/// 3. Otherwise assume the callback passes its element through.
-fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
+/// 3. Otherwise use the return type the callback's own type declares
+///    (a `callable(…): T` or `Closure(…): T` value).
+/// 4. Otherwise assume the callback passes its element through.
+///
+/// `input_element` is the value the callback is handed: the input's
+/// element type, or one shape entry's value.
+fn array_map_element_type(
+    args: &dyn ArrayFuncArgs,
+    input_element: Option<PhpType>,
+) -> Option<PhpType> {
     if let Some(declared) = args.callback_declared_return_type(0)
         && !declared.is_untyped()
     {
-        let seed = args
-            .arg_raw_type(1)
-            .and_then(|t| t.iterable_element_type())
-            .unwrap_or_else(PhpType::mixed);
+        let seed = input_element.unwrap_or_else(PhpType::mixed);
         let narrowed = args
             .callback_inferred_return_type(0, &seed)
             .filter(|inferred| args.narrows(inferred, &declared));
         return Some(narrowed.unwrap_or(declared));
     }
 
-    let input_element = args.arg_raw_type(1)?.iterable_element_type()?;
-
-    if let Some(inferred) = args.callback_inferred_return_type(0, &input_element) {
+    if let Some(inferred) = input_element
+        .as_ref()
+        .and_then(|element| args.callback_inferred_return_type(0, element))
+    {
         return Some(inferred);
+    }
+
+    if let Some(returned) = args
+        .arg_raw_type(0)
+        .as_ref()
+        .and_then(PhpType::callable_return_type)
+        .filter(|ty| !ty.is_untyped() && !ty.is_mixed())
+    {
+        return Some(returned.clone());
     }
 
     // Final fallback: assume the callback passes its element through. That
@@ -1266,5 +1332,5 @@ fn array_map_element_type(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     // scalar element says nothing about the result, and `array_map('intval',
     // $strings)` would be reported as `list<string>` on the strength of an
     // input the callback exists to change.
-    (!input_element.is_scalar_leaf()).then_some(input_element)
+    input_element.filter(|element| !element.is_scalar_leaf())
 }

@@ -29,69 +29,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B515. `array_map` over a shape loses the shape
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$a = array_map(fn (int $i): int => $i, [1, 2, 3]);
-// list<int>, should be array{int, int, int}
-
-$b = array_map(fn (string $x) => new RuntimeException($x), ['c' => '']);
-// array<string, RuntimeException>, should be array{c: RuntimeException}
-
-$c = array_map((new SplQueue())->enqueue(...), [1, 2, 3]);
-// list<void>, should be array{null, null, null}
-```
-
-With a single array argument, `array_map` keeps every key of that array
-and replaces each value with the callback's result, so a shape stays a
-shape: same keys, same arity, each value the callback's return type. The
-rule in `type_engine/variable/array_func_rules.rs` builds the container
-the shape describes instead. A `void` callback's result is `null` when
-used as a value, not `void`.
-
-The SKIPs are in `tests/psalm_assertions/closure.php` and
-`array_assignment.php`, under "array_map over a shape loses the shape".
-Found porting Psalm's `ClosureTest.php` and `ArrayAssignmentTest.php`.
-
-### B516. `array_map` with a callable-typed variable loses the element type
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/**
- * @template T
- * @param class-string<T> $className
- * @return callable(...mixed): T
- */
-function maker(string $className) { … }
-
-$result = array_map(maker(stdClass::class), ['abc']);
-// array, should be array{stdClass}
-```
-
-`ArrayFuncArgs::callback_declared_return_type` answers for an inline
-closure or a function-name string, but not for a callback whose own type
-is a `callable(…): T`/`Closure(…): T`, so the rule falls back to a bare
-`array`.
-
-Found porting Psalm's `ClosureTest.php` (`CallableWithArrayMap`).
-
-### B517. `sort()` leaves an empty array typed as a bare `array`
-
-**Impact: Low · Complexity: Low**
-
-```php
-$c = [];
-sort($c);
-// array, should be array{}
-```
-
-Sorting an empty array leaves it empty, but the by-reference write-back
-leaves the argument a bare `array` rather than keeping its empty shape.
-
-Found porting Psalm's `ArgTest.php` (`sortFunctions`).
+No outstanding items.
 
 ## Reachability
 

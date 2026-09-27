@@ -55,7 +55,7 @@ namespace PsalmTest_closure_4 {
     $mirror = function(int $i) : int { return $i; };
     $a = array_map($mirror, [1, 2, 3]);
 
-    assertType('list{int, int, int}', $a); // SKIP: array_map over a shape loses the shape
+    assertType('list{int, int, int}', $a);
 }
 
 // Test: returnsTypedClosureWithClasses
@@ -162,7 +162,7 @@ namespace PsalmTest_closure_9 {
     $maker = maker(stdClass::class);
     $result = array_map($maker, ["abc"]);
 
-    assertType('list{stdClass}', $result); // SKIP: array_map with a callable-typed variable loses the element type
+    assertType('list{stdClass}', $result);
 }
 
 // Test: templateShenanigans
@@ -396,9 +396,9 @@ namespace PsalmTest_closure_21 {
     $result2 = array_map(strval(...), $array);
     $result3 = array_map($closure(...), $array);
 
-    assertType('list{null, null, null}', $result1); // SKIP: array_map over a shape loses the shape, and a `void` callback's results are typed `void`
-    assertType('list{string, string, string}', $result2); // SKIP: array_map over a shape loses the shape
-    assertType('list{int, int, int}', $result3); // SKIP: array_map over a shape loses the shape
+    assertType('list{null, null, null}', $result1);
+    assertType('list{string, string, string}', $result2);
+    assertType('list{int, int, int}', $result3);
 }
 
 // Test: FirstClassCallable:AssignmentVisitorMap

@@ -44,7 +44,8 @@ fn parse_type_text(input: &str) -> Option<PhpType> {
     // Replace known hyphenated pseudo-types (e.g. `model-property`)
     // with underscore placeholders so Mago can parse the surrounding
     // type structure.  The placeholders are restored in the result.
-    let cleaned = replace_hyphenated_keywords(input);
+    let postfixed = postfix_prefix_variadics(input);
+    let cleaned = replace_hyphenated_keywords(&postfixed);
     let effective: &str = &cleaned;
 
     let span = Span::new(
@@ -227,6 +228,79 @@ const HYPHENATED_KEYWORDS: &[(&str, &str)] = &[
 /// Replace known hyphenated pseudo-type names with underscore
 /// placeholders so that `mago_phpdoc_syntax` can parse the surrounding
 /// type structure (e.g. `array<model-property<T>, mixed>`).
+/// Rewrite Psalm's prefix variadic callable parameter (`callable(...mixed):
+/// T`) as the postfix form the PHPDoc grammar accepts (`callable(mixed...):
+/// T`).
+///
+/// Only an ellipsis that opens a parameter directly inside `(…)` is moved,
+/// so an unsealed shape's `array{a: int, ...}` is left alone. A parameter
+/// name after the type (`...mixed $args`) is dropped, as the parsed type
+/// does not keep it anyway.
+fn postfix_prefix_variadics(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.contains("...") {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let bytes = s.as_bytes();
+    let mut out = String::new();
+    let mut copied = 0;
+    let mut openers: Vec<u8> = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'(' | b'<' | b'{' | b'[' => openers.push(b),
+            b')' | b'>' | b'}' | b']' => {
+                openers.pop();
+            }
+            _ => {}
+        }
+        let opens_param = matches!(b, b'(' | b',') && openers.last() == Some(&b'(');
+        if opens_param {
+            let after = &s[i + 1..];
+            let rest = after.trim_start();
+            if let Some(ty_start) = rest.strip_prefix("...")
+                && let ty_start = ty_start.trim_start()
+                && ty_start
+                    .bytes()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || matches!(c, b'\\' | b'?' | b'_'))
+            {
+                let ty_len = param_type_len(ty_start);
+                out.push_str(&s[copied..=i]);
+                out.push_str(ty_start[..ty_len].trim_end());
+                out.push_str("...");
+                // Skip the parameter name, if any, up to the separator.
+                let tail = &ty_start[ty_len..];
+                let name_len = tail.find([',', ')']).unwrap_or(tail.len());
+                i = s.len() - tail.len() + name_len;
+                copied = i;
+                continue;
+            }
+        }
+        i += 1;
+    }
+    if copied == 0 {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    out.push_str(&s[copied..]);
+    std::borrow::Cow::Owned(out)
+}
+
+/// Length of the type at the start of a callable parameter: everything up
+/// to the first top-level `,`, `)`, `=` or `$`.
+fn param_type_len(s: &str) -> usize {
+    let mut depth = 0usize;
+    for (i, b) in s.bytes().enumerate() {
+        match b {
+            b'(' | b'<' | b'{' | b'[' => depth += 1,
+            b')' | b'>' | b'}' | b']' if depth > 0 => depth -= 1,
+            b',' | b')' | b'=' | b'$' if depth == 0 => return i,
+            _ => {}
+        }
+    }
+    s.len()
+}
+
 fn replace_hyphenated_keywords(s: &str) -> std::borrow::Cow<'_, str> {
     let mut result = std::borrow::Cow::Borrowed(s);
     for &(hyphenated, placeholder) in HYPHENATED_KEYWORDS {

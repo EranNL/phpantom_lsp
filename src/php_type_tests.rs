@@ -265,6 +265,18 @@ fn round_trip_callables() {
 }
 
 #[test]
+fn callable_variadic_parameter_spellings() {
+    assert_round_trip("callable(mixed...): T");
+    // Psalm writes the ellipsis ahead of the type.
+    assert_round_trip_expected("callable(...mixed): T", "callable(mixed...): T");
+    assert_round_trip_expected("callable(int, ...string): T", "callable(int, string...): T");
+    assert_round_trip_expected(
+        "Closure(... array<int, string> $rest): void",
+        "Closure(array<int, string>...): void",
+    );
+}
+
+#[test]
 fn round_trip_class_string() {
     // mago Display bug: class-string<Foo> → class-string<<Foo>>
     assert_round_trip_expected("class-string<Foo>", "class-string<Foo>");

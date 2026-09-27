@@ -702,7 +702,10 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
         resolve_literal_test_var(content, "$tuple_spread"),
         "list<'left'|'right'>"
     );
-    assert_eq!(resolve_literal_test_var(content, "$mapped"), "list<string>");
+    assert_eq!(
+        resolve_literal_test_var(content, "$mapped"),
+        "array{string}"
+    );
     assert_eq!(
         resolve_literal_test_var(content, "$converted"),
         "array<int, string>"

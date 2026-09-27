@@ -782,6 +782,20 @@ pub(crate) fn infer_closure_literal_type(
     expr: &Expression<'_>,
     ctx: &VarResolutionCtx<'_>,
 ) -> PhpType {
+    // `$fn(...)` wraps a callable value rather than naming a function, so
+    // the closure it makes has that value's own signature.
+    if let Expression::PartialApplication(PartialApplication::Function(fpa)) = expr
+        && !matches!(fpa.function, Expression::Identifier(_))
+    {
+        let resolved = resolve_rhs_expression(fpa.function, ctx);
+        if let TypeKind::Callable(callable) = ResolvedType::types_joined(&resolved).kind() {
+            return PhpType::callable_type(crate::php_type::CallableType {
+                kind: atom("Closure"),
+                ..(**callable).clone()
+            });
+        }
+    }
+
     let explicit_or_yield = {
         let span = expr.span();
         let start = (span.start.offset as usize).min(ctx.content.len());

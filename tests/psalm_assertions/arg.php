@@ -34,7 +34,8 @@ namespace PsalmTest_arg_3 {
 
     // PHPantom keeps the literal values Psalm's assertion widens to their base type.
     assertType('array{b: 5, a: 8}', $a);
-    assertType('list<never>', $c); // SKIP: `sort()` leaves an empty array typed as a bare `array`
+    // Psalm's `list<never>` is the same empty array.
+    assertType('array{}', $c);
 }
 
 // Test: mixedNullable

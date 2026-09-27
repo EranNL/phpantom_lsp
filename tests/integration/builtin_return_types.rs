@@ -600,6 +600,104 @@ function probe(array $maybe): void {
     );
 }
 
+/// Sorting reorders an array without changing which values it holds. The
+/// sorts that renumber turn it into a list of the same values, the ones
+/// that keep keys leave it as it was, and an empty array stays empty.
+#[test]
+fn sorts_keep_the_values_they_reorder() {
+    let content = r#"<?php
+/** @param array<string, int> $scores */
+function probe(array $scores): void {
+    $keyed = ['b' => 5, 'a' => 8];
+    sort($keyed);
+    $sorted = $keyed;
+    rsort($scores);
+    $ranked = $scores;
+    $empty = [];
+    sort($empty);
+    $stillEmpty = $empty;
+    $none = [];
+    ksort($none);
+    $stillNone = $none;
+    $byKey = ['b' => 5, 'a' => 8];
+    ksort($byKey);
+    $kept = $byKey;
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$sorted", "non-empty-list<5|8>"),
+            ("$ranked", "list<int>"),
+            ("$stillEmpty", "array{}"),
+            ("$stillNone", "array{}"),
+            ("$kept", "array{b: 5, a: 8}"),
+        ],
+    );
+}
+
+/// With a single array, `array_map` keeps every key and replaces each value
+/// with what the callback returns for it, so a shape stays a shape. A
+/// `void` callback's result is stored as `null`.
+#[test]
+fn array_map_over_a_shape_keeps_its_keys() {
+    let content = r#"<?php
+function probe(): void {
+    $ints = array_map(fn (int $i): int => $i, [1, 2, 3]);
+    $keyed = array_map(fn (string $x) => new RuntimeException($x), ['c' => '']);
+    $mixed = array_map(fn ($v) => $v, ['a' => 1, 'b' => 'x']);
+    $nulls = array_map((new SplQueue())->enqueue(...), [1, 2]);
+    /** @var list<int> $list */
+    $list = [];
+    $voids = array_map((new SplQueue())->enqueue(...), $list);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$ints", "array{int, int, int}"),
+            ("$keyed", "array{c: RuntimeException}"),
+            ("$mixed", "array{a: int, b: string}"),
+            ("$nulls", "array{null, null}"),
+            ("$voids", "list<null>"),
+        ],
+    );
+}
+
+/// A callback whose own type is a `callable(…): T` maps each element to
+/// `T`, including Psalm's `callable(...mixed): T` spelling and a
+/// first-class callable made from a closure variable.
+#[test]
+fn array_map_with_a_callable_typed_callback() {
+    let content = r#"<?php
+/**
+ * @template T
+ * @param class-string<T> $className
+ * @return callable(...mixed): T
+ */
+function maker(string $className) { return fn () => new $className(); }
+
+function probe(): void {
+    $maker = maker(stdClass::class);
+    $made = array_map($maker, ['abc']);
+    $inline = array_map(maker(stdClass::class), ['abc']);
+    $square = fn (int $value): int => $value * $value;
+    $squares = array_map($square(...), [1, 2, 3]);
+    $wrapped = $square(...);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$maker", "callable(mixed...): stdClass"),
+            ("$made", "array{stdClass}"),
+            ("$inline", "array{stdClass}"),
+            ("$squares", "array{int, int, int}"),
+            ("$wrapped", "Closure(int): int"),
+        ],
+    );
+}
+
 /// A loop body is walked until the variables settle, which a shape that
 /// loses an entry on every pass never does, so a removal inside one leaves
 /// the container the shape describes.
