@@ -510,6 +510,28 @@ pub(crate) fn process_foreach<'b>(
     let own_key_write_target = foreach_own_keys(foreach)
         .filter(|(array_var, key_var)| body_writes_own_key(&body_stmts, array_var, key_var));
 
+    // A dynamic-key write onto some *other* array (`$out[$k] = …`, unlike
+    // `own_key_write_target`'s self-mutating `$pairs[$cn] = …`) that runs on
+    // every path through the body describes that array's element at
+    // whatever key the loop is currently visiting — a fact that stays true
+    // regardless of which concrete key that is, and so survives the key
+    // variable's rebind between fixed-point passes. Without this, the
+    // rebind's blanket invalidation of synthetic keys reading the old key
+    // (`reset_foreach_target`) drops it, and the next pass falls back to
+    // the array's own general element type, which a loop write always
+    // widens scalar literals in (see `array_shape_writes::merge_nested_array_write_inner`).
+    let carried_key_writes: Vec<String> = if let ForeachTarget::KeyValue(kv) = &foreach.target
+        && let Expression::Variable(Variable::Direct(dv)) = kv.key
+    {
+        let key_var = bytes_to_str(dv.name);
+        always_written_array_vars(&body_stmts, key_var)
+            .into_iter()
+            .filter_map(|array_var| array_write_synthetic_key(&array_var, &[kv.key]))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // A `foreach` over an array the engine watched being built and knows
     // is still empty runs zero times, so it cannot change any type.  The
     // body is still walked so that a cursor or diagnostic inside it is
@@ -546,6 +568,13 @@ pub(crate) fn process_foreach<'b>(
             if point != LoopSeedPoint::Entry {
                 return;
             }
+            let carried: Vec<(&str, Vec<ResolvedType>)> = carried_key_writes
+                .iter()
+                .filter_map(|key| {
+                    let types = next_scope.get(key);
+                    (!types.is_empty()).then(|| (key.as_str(), types.to_vec()))
+                })
+                .collect();
             // Re-bind the foreach variables for the next iteration,
             // discarding what the previous one wrote to them.
             match &foreach.target {
@@ -575,6 +604,11 @@ pub(crate) fn process_foreach<'b>(
                 record_key_value_pairing(foreach, iter_type.as_ref(), next_scope, ctx);
             }
             record_existing_keys(foreach, next_scope);
+            for (key, types) in carried {
+                if !next_scope.contains(key) {
+                    next_scope.set(key, types);
+                }
+            }
         },
     );
 
@@ -870,6 +904,87 @@ fn assignment_targets_own_key(expr: &Expression<'_>, array_var: &str, key_var: &
         key_chain.first(),
         Some(Expression::Variable(Variable::Direct(dv))) if bytes_to_str(dv.name) == key_var
     )
+}
+
+/// Every array variable that a write through `key_var` (`array_var[key_var]
+/// = …`, at any depth) targets on *every* path through `stmts`, following
+/// an `if`/`elseif`/`else` chain whose arms all write it as long as an
+/// `else` makes the chain exhaustive.
+///
+/// Unlike [`body_writes_own_key`] (which only trusts a write outside any
+/// branch, because it doesn't need to know which array), this only needs
+/// to know whether *some* array is unconditionally rewritten at the
+/// current key — so a write split across an if/else, like
+/// `if (…) { $out[$k] = []; } else { $out[$k] = 'toto'; }`, still counts.
+fn always_written_array_vars(stmts: &[&Statement<'_>], key_var: &str) -> HashSet<String> {
+    let mut result = HashSet::new();
+    for stmt in stmts {
+        result.extend(statement_always_written_array_vars(stmt, key_var));
+    }
+    result
+}
+
+fn statement_always_written_array_vars(stmt: &Statement<'_>, key_var: &str) -> HashSet<String> {
+    match stmt {
+        Statement::Block(block) => {
+            let inner: Vec<&Statement<'_>> = block.statements.iter().collect();
+            always_written_array_vars(&inner, key_var)
+        }
+        Statement::Expression(expr_stmt) => own_key_write_array_var(expr_stmt.expression, key_var)
+            .into_iter()
+            .collect(),
+        Statement::If(if_stmt) => if_always_written_array_vars(if_stmt, key_var),
+        _ => HashSet::new(),
+    }
+}
+
+/// The arrays an `if`/`elseif`/`else` chain unconditionally writes
+/// through `key_var`: the intersection of what every arm guarantees,
+/// since exactly one of them runs. A chain without a trailing `else`
+/// guarantees nothing, since it may run none of its arms.
+fn if_always_written_array_vars(if_stmt: &If<'_>, key_var: &str) -> HashSet<String> {
+    let IfBody::Statement(body) = &if_stmt.body else {
+        return HashSet::new();
+    };
+    let Some(else_clause) = &body.else_clause else {
+        return HashSet::new();
+    };
+    let mut arms = vec![statement_always_written_array_vars(body.statement, key_var)];
+    arms.extend(
+        body.else_if_clauses
+            .iter()
+            .map(|clause| statement_always_written_array_vars(clause.statement, key_var)),
+    );
+    arms.push(statement_always_written_array_vars(
+        else_clause.statement,
+        key_var,
+    ));
+    let mut arms = arms.into_iter();
+    let first = arms.next().unwrap_or_default();
+    arms.fold(first, |acc, arm| acc.intersection(&arm).cloned().collect())
+}
+
+/// Whether `expr` is an assignment through `key_var` (`array_var[key_var]
+/// = …`, or a deeper access through it), returning the array it targets.
+fn own_key_write_array_var(expr: &Expression<'_>, key_var: &str) -> Option<String> {
+    let Expression::Assignment(assign) = expr else {
+        return None;
+    };
+    let outer_access = match assign.lhs {
+        Expression::ArrayAccess(aa) => Some(aa),
+        Expression::ArrayAppend(aa) => match aa.array {
+            Expression::ArrayAccess(inner) => Some(inner),
+            _ => None,
+        },
+        _ => None,
+    };
+    let (base_name, key_chain) =
+        super::super::array_shape_writes::extract_nested_array_access_chain(outer_access?)?;
+    matches!(
+        key_chain.first(),
+        Some(Expression::Variable(Variable::Direct(dv))) if bytes_to_str(dv.name) == key_var
+    )
+    .then_some(base_name)
 }
 
 /// The element type a by-reference `foreach` leaves in the array it

@@ -17,11 +17,11 @@ class FlowNodeManager
 
 		foreach ($a as $k => $b) {
 			$str = 'toto';
-			assertType('\'toto\'|array{}', $out[$k]); // SKIP: a literal written under a non-literal key is widened on the loop's next pass
+			assertType('\'toto\'|array{}', $out[$k]);
 
 			if (is_array($b)) {
 				// $out[$k] is redefined there before the array_merge
-				assertType('\'toto\'|array{}', $out[$k]); // SKIP: a literal written under a non-literal key is widened on the loop's next pass
+				assertType('\'toto\'|array{}', $out[$k]);
 				$out[$k] = [];
 				assertType('array{}', $out[$k]);
 				$out[$k] = array_merge($out[$k], []);

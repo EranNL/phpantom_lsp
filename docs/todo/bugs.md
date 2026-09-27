@@ -272,20 +272,7 @@ Found porting PHPStan's `nsrt/union-intersection.php`; the assertions are `// SK
 
 ## Array types
 
-### B497. A literal written under a non-literal key is widened on the loop's next pass
-**Impact: Low · Complexity: Medium**
-
-```php
-$out = [];
-foreach (['foof' => 'barr', 'ftt' => []] as $k => $b) {
-    $out[$k]; // should be 'toto'|array{}, is string|array{}
-    if (is_array($b)) { $out[$k] = []; } else { $out[$k] = 'toto'; }
-}
-```
-
-The write itself keeps `'toto'`, so the widening happens when the loop body's exit state is merged back into its entry.
-
-Found porting PHPStan's `nsrt/bug-1516.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Laravel
 
