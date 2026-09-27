@@ -829,101 +829,17 @@ impl Backend {
             return vec![cls_arc];
         }
 
-        // Fast path: no template params, no inference needed.
-        if cls_arc.template_params.is_empty() || text_args.is_empty() {
+        if cls_arc.template_params.is_empty() {
             return vec![cls_arc];
         }
 
-        // Find the constructor (on this class or an ancestor).
-        let ancestor_arc;
-        let ctor_inherited;
-        let ctor_owner: &ClassInfo;
-        let ctor_ref = if let Some(c) = cls_arc.get_method("__construct") {
-            ctor_inherited = false;
-            ctor_owner = &cls_arc;
-            Some(c)
-        } else {
-            let found = crate::inheritance::ancestors(&cls_arc, ctx.class_loader)
-                .find(|(_, parent)| parent.get_method("__construct").is_some());
-            match found {
-                Some((_, arc)) => {
-                    ancestor_arc = arc;
-                    ctor_inherited = true;
-                    ctor_owner = &ancestor_arc;
-                    ancestor_arc.get_method("__construct")
-                }
-                None => {
-                    ctor_inherited = false;
-                    ctor_owner = &cls_arc;
-                    None
-                }
-            }
-        };
-
-        if let Some(ctor) = ctor_ref
-            && !ctor.template_bindings.is_empty()
-        {
-            let arg_texts = crate::type_engine::conditional_resolution::split_text_args(text_args);
-            if !arg_texts.is_empty() {
-                // A param nothing bound is filled from the *class's*
-                // bound below, not the constructor's: a constructor
-                // essentially never repeats `@template … of …`.
-                let subs = crate::type_engine::call_resolution::bind_constructor_template_args(
-                    ctor_owner, ctor, &arg_texts, ctx,
-                );
-
-                // Remap inherited constructor subs to the child's
-                // template param names via the @extends chain.
-                let effective_subs = if ctor_inherited && !subs.is_empty() {
-                    crate::type_engine::variable::rhs_resolution::remap_inherited_ctor_subs(
-                        &cls_arc,
-                        &subs,
-                        ctx.class_loader,
-                    )
-                } else {
-                    subs
-                };
-
-                if !effective_subs.is_empty() {
-                    let type_args: Vec<PhpType> = cls_arc
-                        .template_params
-                        .iter()
-                        .map(|p| {
-                            let p_str: &str = p.as_ref();
-                            effective_subs.get(p_str).cloned().unwrap_or_else(|| {
-                                cls_arc
-                                    .template_param_bounds
-                                    .get(p)
-                                    .cloned()
-                                    .unwrap_or_else(PhpType::mixed)
-                            })
-                        })
-                        .collect();
-                    let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-                        &cls_arc,
-                        ctx.class_loader,
-                        ctx.resolved_class_cache,
-                        &type_args,
-                    );
-                    if let Some(ref mut hint_out) = return_type_hint_out {
-                        **hint_out = Some(PhpType::generic_atom(substituted.fqn(), type_args));
-                    }
-                    return vec![substituted];
-                }
-            }
-        }
-
-        // Fallback: resolve omitted template params to their defaults
-        // and otherwise erase them to their bounds.
-        let type_args = crate::inheritance::default_type_args(&cls_arc);
-        let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-            &cls_arc,
-            ctx.class_loader,
-            ctx.resolved_class_cache,
-            &type_args,
-        );
+        // An omitted argument still binds through its parameter's default,
+        // so `new E` and `new E()` go through here too.
+        let arg_texts = split_text_args(text_args);
+        let (generic_type, substituted) =
+            crate::type_engine::call_resolution::instantiate_class(&cls_arc, &arg_texts, ctx);
         if let Some(ref mut hint_out) = return_type_hint_out {
-            **hint_out = Some(PhpType::generic_atom(substituted.fqn(), type_args));
+            **hint_out = Some(generic_type);
         }
         vec![substituted]
     }

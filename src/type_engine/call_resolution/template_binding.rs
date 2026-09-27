@@ -10,6 +10,7 @@
 /// here and their callers take care of.
 use std::borrow::Cow;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, AtomMap, atom};
@@ -146,7 +147,7 @@ pub(crate) fn bind_template_args(
 /// An object outlives the call that shaped it, so a literal argument is
 /// generalized to its base type unless the template's bound says the
 /// literal is the point (see [`generalize_object_template_arg`]).
-pub(crate) fn bind_constructor_template_args(
+fn bind_constructor_template_args(
     class: &ClassInfo,
     ctor: &MethodInfo,
     arg_texts: &[&str],
@@ -507,4 +508,131 @@ fn wrapper_constructor_template(
         bind_constructor_template_args(&wrapper_cls, wrapper_ctor, &wrapper_arg_texts, ctx);
     let wrapper_tpl = wrapper_cls.template_params.get(tpl_position)?;
     wrapper_subs.get(wrapper_tpl.as_str()).cloned()
+}
+
+/// The class `new` produces from `arg_texts`: its type, with each template
+/// bound from the constructor arguments, and the class resolved against
+/// those arguments.
+///
+/// A template no argument binds takes its declared default, else its bound,
+/// else `mixed`, so a raw template name never reaches the members.
+pub(crate) fn instantiate_class(
+    cls: &ClassInfo,
+    arg_texts: &[&str],
+    ctx: &ResolutionCtx<'_>,
+) -> (PhpType, Arc<ClassInfo>) {
+    let subs = constructor_class_subs(cls, arg_texts, ctx);
+    let mut type_args = crate::inheritance::default_type_args(cls);
+    for (param, arg) in cls.template_params.iter().zip(type_args.iter_mut()) {
+        if let Some(bound) = subs.get(param.as_str()) {
+            *arg = bound.clone();
+        }
+    }
+    let mut substituted = crate::virtual_members::resolve_class_fully_with_type_args(
+        cls,
+        ctx.class_loader,
+        ctx.resolved_class_cache,
+        &type_args,
+    );
+
+    // A `@mixin TParam` naming a template cannot be resolved while the class
+    // is, because the mixin is not known until the template is bound.
+    if !subs.is_empty()
+        && cls
+            .mixins
+            .iter()
+            .any(|m| cls.template_params.iter().any(|t| t == m.as_str()))
+    {
+        let generic_subs = crate::inheritance::build_generic_subs(cls, &type_args);
+        let mixin_members = crate::virtual_members::phpdoc::resolve_template_param_mixins(
+            cls,
+            &generic_subs,
+            ctx.class_loader,
+        );
+        if !mixin_members.is_empty() {
+            crate::virtual_members::merge_virtual_members(
+                Arc::make_mut(&mut substituted),
+                mixin_members,
+            );
+        }
+    }
+
+    (PhpType::generic_atom(cls.fqn(), type_args), substituted)
+}
+
+/// `cls`'s templates as its constructor's arguments bind them, keyed by
+/// `cls`'s own template names even when the constructor is inherited.
+fn constructor_class_subs(
+    cls: &ClassInfo,
+    arg_texts: &[&str],
+    ctx: &ResolutionCtx<'_>,
+) -> HashMap<String, PhpType> {
+    // The constructor is taken from the class that declares it, unsubstituted,
+    // so its bindings still name that class's templates.
+    let (ctor_owner, inherited) = if cls.get_method("__construct").is_some() {
+        (None, false)
+    } else {
+        match crate::inheritance::ancestors(cls, ctx.class_loader)
+            .find(|(_, parent)| parent.get_method("__construct").is_some())
+        {
+            Some((_, ancestor)) => (Some(ancestor), true),
+            None => return HashMap::new(),
+        }
+    };
+    let owner = ctor_owner.as_deref().unwrap_or(cls);
+    let Some(ctor) = owner.get_method("__construct") else {
+        return HashMap::new();
+    };
+    if ctor.template_bindings.is_empty() {
+        return HashMap::new();
+    }
+
+    let subs = bind_constructor_template_args(owner, ctor, arg_texts, ctx);
+    let mut subs = if inherited && !subs.is_empty() {
+        crate::type_engine::variable::rhs_resolution::remap_inherited_ctor_subs(
+            cls,
+            &subs,
+            ctx.class_loader,
+        )
+    } else {
+        subs
+    };
+    if !subs.is_empty() {
+        infer_templates_from_bound_args(cls, &mut subs);
+    }
+    subs
+}
+
+/// Bind the templates a bound's generic arguments name, from what the
+/// bounded template itself was bound to.
+///
+/// `TIterator as Iterator<TKey, TValue>` bound to `Generator<int, string>`
+/// makes `TKey` `int` and `TValue` `string`.
+fn infer_templates_from_bound_args(cls: &ClassInfo, subs: &mut HashMap<String, PhpType>) {
+    for (bound_param, bound_type) in cls.template_param_bounds.iter() {
+        let TypeKind::Generic(bound) = bound_type.kind() else {
+            continue;
+        };
+        let Some(concrete) = subs.get(bound_param.as_str()) else {
+            continue;
+        };
+        let TypeKind::Generic(concrete) = concrete.kind() else {
+            continue;
+        };
+        let inferred: Vec<(String, PhpType)> = bound
+            .args
+            .iter()
+            .zip(concrete.args.iter())
+            .filter_map(|(bound_arg, concrete_arg)| match bound_arg.kind() {
+                TypeKind::Named(tpl_name)
+                    if cls.template_params.contains(tpl_name)
+                        && !subs.contains_key(tpl_name.as_str()) =>
+                {
+                    Some((tpl_name.to_string(), concrete_arg.clone()))
+                }
+                _ => None,
+            })
+            .collect();
+        subs.extend(inferred);
+    }
 }

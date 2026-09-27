@@ -85,9 +85,7 @@ pub(crate) use target_cache::{
     activate_type_engine_caches, body_inference_in_progress, call_site_param_types,
     try_infer_body_return_type,
 };
-pub(crate) use template_binding::{
-    TemplateCallee, bind_constructor_template_args, bind_template_args,
-};
+pub(crate) use template_binding::{TemplateCallee, bind_template_args, instantiate_class};
 pub(crate) use template_subs::{
     array_literal_shape_type_with, build_call_template_subs, evaluate_constant_operands,
     finish_template_subs, generalize_object_template_arg,

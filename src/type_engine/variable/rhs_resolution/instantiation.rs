@@ -114,176 +114,25 @@ pub(super) fn resolve_rhs_instantiation(
             })
             .flatten();
         if let Some(cls) = declaration.as_deref() {
-            // Look for the constructor on the raw class first; if not
-            // found (child class without its own constructor), walk up
-            // the parent chain to find the original declaring class and
-            // use its unsubstituted constructor.  This preserves the
-            // original template param names in `template_bindings` so
-            // that `classify_template_binding` can match them against
-            // the parameter type hints (e.g. `array<T>` with binding
-            // `("T", "$arr")`).
-            let ancestor_cls_arc;
-            let ctor_owner: &ClassInfo;
-            let ctor_inherited;
-            let ctor_ref = if let Some(c) = cls.get_method("__construct") {
-                ctor_inherited = false;
-                ctor_owner = cls;
-                Some(c)
-            } else {
-                let found = crate::inheritance::ancestors(cls, ctx.class_loader)
-                    .find(|(_, parent)| parent.get_method("__construct").is_some());
-                match found {
-                    Some((_, arc)) => {
-                        ancestor_cls_arc = arc;
-                        ctor_inherited = true;
-                        ctor_owner = &ancestor_cls_arc;
-                        ancestor_cls_arc.get_method("__construct")
-                    }
-                    None => {
-                        ctor_inherited = false;
-                        ctor_owner = cls;
-                        None
-                    }
-                }
-            };
-            if let Some(ctor) = ctor_ref
-                && !ctor.template_bindings.is_empty()
-            {
-                // An omitted argument still binds through its parameter's
-                // default, so `new E` and `new E()` go through here too.
-                let arg_texts = inst
-                    .argument_list
-                    .as_ref()
-                    .map(|arg_list| {
-                        crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
-                            arg_list,
-                            ctx.content,
-                        )
-                    })
-                    .unwrap_or_default();
-                let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
-                let raw_subs = crate::type_engine::call_resolution::bind_constructor_template_args(
-                    ctor_owner,
-                    ctor,
+            // An omitted argument still binds through its parameter's
+            // default, so `new E` and `new E()` go through here too.
+            let arg_texts = inst
+                .argument_list
+                .as_ref()
+                .map(|arg_list| {
+                    crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                        arg_list,
+                        ctx.content,
+                    )
+                })
+                .unwrap_or_default();
+            let arg_refs: Vec<&str> = arg_texts.iter().map(String::as_str).collect();
+            let (generic_type, substituted) =
+                crate::type_engine::call_resolution::instantiate_class(
+                    cls,
                     &arg_refs,
                     &ctx.as_resolution_ctx(),
                 );
-                // When the constructor is inherited, its template_bindings
-                // reference the ancestor's template param names.  Remap
-                // them to the child's template params via the @extends chain.
-                let subs = if ctor_inherited && !raw_subs.is_empty() {
-                    remap_inherited_ctor_subs(cls, &raw_subs, ctx.class_loader)
-                } else {
-                    raw_subs
-                };
-                if !subs.is_empty() {
-                    // ── Infer unbound template params from bound constraints ──
-                    // When a template param has a bound like
-                    // `TIterator as Iterator<TKey, TValue>` and TIterator
-                    // has been resolved to a concrete type (e.g.
-                    // `Generator<int, string>`), match the concrete type's
-                    // generic args against the bound's args to infer the
-                    // nested template params (TKey=int, TValue=string).
-                    let mut subs = subs;
-                    for (bound_param, bound_type) in cls.template_param_bounds.iter() {
-                        let bound_param_str: &str = bound_param.as_ref();
-                        if let Some(concrete) = subs.get(bound_param_str).cloned()
-                            && let TypeKind::Generic(bound) = bound_type.kind()
-                        {
-                            let concrete_args = match &concrete.kind() {
-                                TypeKind::Generic(g) => Some(g.args.as_slice()),
-                                _ => None,
-                            };
-                            if let Some(concrete_args) = concrete_args {
-                                for (i, bound_arg) in bound.args.iter().enumerate() {
-                                    if let TypeKind::Named(tpl_name) = bound_arg.kind()
-                                        && cls
-                                            .template_params
-                                            .iter()
-                                            .any(|t| t.as_str() == tpl_name.as_str())
-                                        && !subs.contains_key(tpl_name.as_str())
-                                        && let Some(concrete_arg) = concrete_args.get(i)
-                                    {
-                                        subs.insert(tpl_name.to_string(), concrete_arg.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    let type_args: Vec<PhpType> = cls
-                        .template_params
-                        .iter()
-                        .map(|p| {
-                            let p_str: &str = p.as_ref();
-                            subs.get(p_str).cloned().unwrap_or_else(|| {
-                                // Use the declared upper bound or `mixed`
-                                // instead of the raw template name so that
-                                // downstream consumers never see
-                                // `PhpType::named("TValue")`.
-                                cls.template_param_bounds
-                                    .get(p)
-                                    .cloned()
-                                    .unwrap_or_else(PhpType::mixed)
-                            })
-                        })
-                        .collect();
-                    let substituted_arc =
-                        crate::virtual_members::resolve_class_fully_with_type_args(
-                            cls,
-                            ctx.class_loader,
-                            ctx.resolved_class_cache,
-                            &type_args,
-                        );
-                    let mut substituted = Arc::unwrap_or_clone(substituted_arc);
-
-                    // ── Template-param mixin resolution ────────────────
-                    // When a class declares `@mixin TParam` where `TParam`
-                    // is a template parameter, the mixin cannot be resolved
-                    // during `resolve_class_fully` because the concrete type
-                    // is not yet known.  Now that generic args are concrete,
-                    // resolve those mixins and merge their members.
-                    if cls
-                        .mixins
-                        .iter()
-                        .any(|m| cls.template_params.iter().any(|t| t == m.as_str()))
-                    {
-                        let generic_subs = crate::inheritance::build_generic_subs(cls, &type_args);
-                        if !generic_subs.is_empty() {
-                            let mixin_members =
-                                crate::virtual_members::phpdoc::resolve_template_param_mixins(
-                                    cls,
-                                    &generic_subs,
-                                    ctx.class_loader,
-                                );
-                            if !mixin_members.is_empty() {
-                                crate::virtual_members::merge_virtual_members(
-                                    &mut substituted,
-                                    mixin_members,
-                                );
-                            }
-                        }
-                    }
-
-                    let generic_type = PhpType::generic_atom(substituted.fqn(), type_args.clone());
-                    return vec![ResolvedType::from_both(generic_type, substituted)];
-                }
-            }
-
-            // ── Fallback: resolve omitted template params ─────────
-            // When no constructor argument bound any template param
-            // (e.g. `new Collection()` with no args, or the
-            // constructor has no template bindings), substitute all
-            // template params with their declared default, upper bound,
-            // or `mixed`. This prevents raw template names from leaking
-            // into method parameter/return types.
-            let type_args = crate::inheritance::default_type_args(cls);
-            let substituted = crate::virtual_members::resolve_class_fully_with_type_args(
-                cls,
-                ctx.class_loader,
-                ctx.resolved_class_cache,
-                &type_args,
-            );
-            let generic_type = PhpType::generic_atom(substituted.fqn(), type_args.clone());
             return vec![ResolvedType::from_both_arc(generic_type, substituted)];
         }
 
