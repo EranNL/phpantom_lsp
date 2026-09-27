@@ -259,7 +259,15 @@ pub fn resolve_conditional_with_text_args_and_defaults(
                     .map_or(target, |(_, param)| param.as_str())
             };
 
-            let param_idx = params.iter().position(|p| p.name == target).unwrap_or(0);
+            // A `$name` the signature does not declare has no argument to
+            // decide it, so nothing is known and both branches remain.
+            let Some(param_idx) = params
+                .iter()
+                .position(|p| p.name == target)
+                .or_else(|| (!target.starts_with('$')).then_some(0))
+            else {
+                return undecided_answer();
+            };
             let is_variadic = params
                 .get(param_idx)
                 .map(|p| p.is_variadic)
@@ -286,6 +294,9 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             let arg_text = arg_text_owned
                 .as_deref()
                 .or(default_text_resolved.as_deref());
+
+            let constant_values = condition_constants_as_values(condition, class_loader, tpl);
+            let condition = constant_values.as_ref().unwrap_or(condition);
 
             if matches!(condition.kind(), TypeKind::ClassString(_)) {
                 // Extract the bound type from `class-string<Bound>`, if any.
@@ -656,6 +667,48 @@ pub fn resolve_conditional_with_text_args_and_defaults(
             Some(conditional.clone())
         }
     }
+}
+
+/// `condition` with each global constant it names (`$flag is
+/// PREG_SPLIT_NO_EMPTY`) replaced by the constant's value, which is what an
+/// argument is compared against. `None` when it names none.
+///
+/// A name that loads as a class is a class, and a name the resolver cannot
+/// read as a literal value is left as written.
+fn condition_constants_as_values(
+    condition: &PhpType,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    tpl: &TemplateContext<'_>,
+) -> Option<PhpType> {
+    let resolve = tpl.arg_type_resolver?;
+    let members = condition.union_members();
+    let mut changed = false;
+    let values: Vec<PhpType> = members
+        .iter()
+        .map(|&member| {
+            let value = match member.kind() {
+                TypeKind::Named(name)
+                    if !member.is_keyword()
+                        && !tpl.params.contains(name)
+                        && class_loader(name).is_none() =>
+                {
+                    resolve(name).filter(|ty| {
+                        ty.as_literal().is_some() || ty.is_true() || ty.is_false() || ty.is_null()
+                    })
+                }
+                _ => None,
+            };
+            changed |= value.is_some();
+            value.unwrap_or_else(|| member.clone())
+        })
+        .collect();
+    if !changed {
+        return None;
+    }
+    Some(match <[PhpType; 1]>::try_from(values) {
+        Ok([single]) => single,
+        Err(values) => PhpType::union(values),
+    })
 }
 
 /// Checks whether the argument text is a quoted string literal.
@@ -1532,6 +1585,13 @@ pub fn resolve_conditional_without_args_and_defaults(
             // Every parameter takes its declared default, so a default the
             // condition can be decided against settles the branch.
             let param_info = params.iter().find(|p| p.name == target);
+            if param_info.is_none() && target.starts_with('$') {
+                return if cond.else_when_undecided {
+                    recurse(else_type)
+                } else {
+                    union_branch_types(recurse(then_type), recurse(else_type))
+                };
+            }
             if let Some(default_text) = param_info.and_then(|p| p.default_value.as_deref())
                 && let Some(matched) = condition_result_from_text(condition, default_text)
             {

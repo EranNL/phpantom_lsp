@@ -442,13 +442,22 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         }
 
         // -- Conditional types ------------------------------------------------
-        cst::Type::Conditional(c) => PhpType::conditional(
-            c.subject.to_string(),
-            c.is_negated(),
-            convert(src, c.target),
-            convert(src, c.then),
-            convert(src, c.r#else),
-        ),
+        cst::Type::Conditional(c) => {
+            let condition = convert(src, c.target);
+            let then_type = convert(src, c.then);
+            let else_type = convert(src, c.r#else);
+            match literal_subject_satisfies(&convert(src, c.subject), &condition) {
+                Some(satisfied) if satisfied ^ c.is_negated() => then_type,
+                Some(_) => else_type,
+                None => PhpType::conditional(
+                    c.subject.to_string(),
+                    c.is_negated(),
+                    condition,
+                    then_type,
+                    else_type,
+                ),
+            }
+        }
 
         // -- class-string / interface-string ----------------------------------
         cst::Type::ClassString(c) => {
@@ -630,6 +639,31 @@ fn flatten_binary<'ast>(
         }
         None => vec![convert(src, ty)],
     }
+}
+
+/// Decide a conditional whose subject is a literal value (`5 is int`,
+/// `true is true`), which needs no argument to settle.
+///
+/// Returns `None` when the subject is not a literal, or when the condition
+/// names something a literal could still satisfy without being a subtype of
+/// it as written: a class, a template, or `callable` (a string can name a
+/// function).
+fn literal_subject_satisfies(subject: &PhpType, condition: &PhpType) -> Option<bool> {
+    let is_literal = subject.as_literal().is_some()
+        || subject.is_true()
+        || subject.is_false()
+        || subject.is_null();
+    if !is_literal {
+        return None;
+    }
+    if subject.is_subtype_of(condition) {
+        return Some(true);
+    }
+    let settled_by_value = condition
+        .union_members()
+        .iter()
+        .all(|member| member.is_primitive_scalar() && !member.is_callable());
+    settled_by_value.then_some(false)
 }
 
 // ---------------------------------------------------------------------------

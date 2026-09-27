@@ -240,6 +240,15 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                     None => continue,
                 };
                 let declaring_namespace = namespace_of_fqn(&declaring_fqn);
+                // The assertions name the receiver class's own templates
+                // (`Ok<TOk> $this`), which a `Result<int, string>` receiver
+                // fills in.
+                let receiver_subs = match rt.type_string.kind() {
+                    TypeKind::Generic(g) if !receiver.template_params.is_empty() => {
+                        crate::inheritance::build_generic_subs(&receiver, &g.args)
+                    }
+                    _ => HashMap::new(),
+                };
                 for assertion in &method.type_assertions {
                     let applies_positively = match assertion.kind {
                         AssertionKind::IfTrue => function_returned_true,
@@ -258,6 +267,11 @@ pub(crate) fn apply_phpstan_assert_condition_narrowing<'b>(
                         &method_call.argument_list,
                         &build_var_ctx("", ctx, &scope_resolver),
                     );
+                    let asserted_type = if receiver_subs.is_empty() {
+                        asserted_type
+                    } else {
+                        asserted_type.substitute(&receiver_subs)
+                    };
                     // Resolve `self`/`static`/`$this` in the asserted type
                     // against the *declaring* class (e.g. `Decimal`), not the
                     // enclosing class (e.g. `Monetary`).  Without this,

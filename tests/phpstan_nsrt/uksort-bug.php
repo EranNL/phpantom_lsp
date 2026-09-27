@@ -37,7 +37,7 @@ class Bar
 
 	public function doFoo(): void
 	{
-		assertType('(int|string)', $this->uksort($this->unknownKeys, function (string $a, string $b): int { // SKIP: a key template bound from an array that names only its value type binds the whole array
+		assertType('(int|string)', $this->uksort($this->unknownKeys, function (string $a, string $b): int {
 			return 1;
 		}));
 

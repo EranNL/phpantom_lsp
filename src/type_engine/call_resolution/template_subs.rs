@@ -343,7 +343,19 @@ impl Backend {
                                 resolved_type.extract_value_type(false).cloned()
                             } else {
                                 match tpl_position {
-                                    0 => resolved_type.extract_key_type(false).cloned(),
+                                    // `Foo[]` names no key type, so its keys
+                                    // are any PHP allows rather than the
+                                    // `int` iteration assumes.
+                                    0 if resolved_type.has_open_key_domain() => {
+                                        Some(PhpType::union(vec![
+                                            PhpType::int(),
+                                            PhpType::string(),
+                                        ]))
+                                    }
+                                    0 => resolved_type
+                                        .extract_key_type(false)
+                                        .cloned()
+                                        .or_else(|| resolved_type.iterable_key_type()),
                                     1 => resolved_type.extract_value_type(false).cloned(),
                                     _ => None,
                                 }
@@ -2193,6 +2205,10 @@ fn unify_template(param_hint: &PhpType, arg_type: &PhpType, tpl_name: &str) -> O
             // key-to-key and value-to-value.
             if !crate::type_engine::variable::rhs_resolution::is_array_like_wrapper(&hint.name) {
                 return None;
+            }
+            // An empty array has no key or value for the template to be.
+            if arg_type.is_empty_array_shape() && names_template_directly(param_hint, tpl_name) {
+                return Some(PhpType::never());
             }
             let key_match = (hint.args.len() >= 2)
                 .then(|| arg_type.extract_key_type(false))

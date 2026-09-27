@@ -109,21 +109,15 @@ unlikely to move the needle for most users.
 | B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
 | B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
 | B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
-| B503 | [A conditional on a name that is not a parameter picks the else branch](todo/bugs.md#b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch) | Low | Low |
 | B482 | [Key functions widen the literal keys of an array literal](todo/bugs.md#b482-key-functions-widen-the-literal-keys-of-an-array-literal) | Low | Low-Medium |
 | B488 | [A call proved through `?->` stays narrowed under its `->` spelling when the method is impure](todo/bugs.md#b488-a-call-proved-through---stays-narrowed-under-its---spelling-when-the-method-is-impure) | Low | Low-Medium |
 | B491 | [The receiver of a nullsafe call is not narrowed inside its arguments](todo/bugs.md#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments) | Low | Low-Medium |
-| B502 | [A global constant as a conditional type's target is not resolved to its value](todo/bugs.md#b502-a-global-constant-as-a-conditional-types-target-is-not-resolved-to-its-value) | Low | Low-Medium |
-| B504 | [A conditional type whose subject is a literal is not evaluated](todo/bugs.md#b504-a-conditional-type-whose-subject-is-a-literal-is-not-evaluated) | Low | Low-Medium |
 | B483 | [`preg_replace()` over an array shape loses its keys](todo/bugs.md#b483-preg_replace-over-an-array-shape-loses-its-keys) | Low | Medium |
 | B485 | [`array_shift()` does not drop the first entry of a list shape](todo/bugs.md#b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape) | Low | Medium |
 | B487 | [An impure call does not forget what was proved about a static property](todo/bugs.md#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property) | Low | Medium |
 | B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
 | B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |
 | B492 | [What the constructor proves about a readonly property of a readonly property is not remembered](todo/bugs.md#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered) | Low | Medium |
-| B505 | [A template bound through another template's bound from an empty array does not bind `never`](todo/bugs.md#b505-a-template-bound-through-another-templates-bound-from-an-empty-array-does-not-bind-never) | Low | Medium |
-| B500 | [A key template bound from an array that names only its value type binds the whole array](todo/bugs.md#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array) | Low | Medium |
-| B501 | [An assertion on `$this` that names a generic class loses the template arguments](todo/bugs.md#b501-an-assertion-on-this-that-names-a-generic-class-loses-the-template-arguments) | Low | Medium |
 | B493 | [A `catch` the try body cannot reach is still merged into `finally`](todo/bugs.md#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

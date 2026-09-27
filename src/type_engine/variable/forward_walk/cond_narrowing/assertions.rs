@@ -467,16 +467,21 @@ fn narrow_type_arguments(
         {
             continue;
         }
-        let TypeKind::Generic(current) = rt.type_string.kind() else {
-            continue;
+        let narrower = match rt.type_string.kind() {
+            // The bare class an `instanceof` narrowed to (`Ok` out of a
+            // `Result<int, string>`) says nothing about its arguments.
+            TypeKind::Named(_) => true,
+            TypeKind::Generic(current) => {
+                current.args.len() == asserted.args.len()
+                    && asserted
+                        .args
+                        .iter()
+                        .zip(&current.args)
+                        .all(|(a, c)| c.is_mixed() || c.is_object() || a.is_subtype_of(c))
+                    && asserted.args != current.args
+            }
+            _ => false,
         };
-        let narrower = current.args.len() == asserted.args.len()
-            && asserted
-                .args
-                .iter()
-                .zip(&current.args)
-                .all(|(a, c)| c.is_mixed() || c.is_object() || a.is_subtype_of(c))
-            && asserted.args != current.args;
         if !narrower {
             continue;
         }

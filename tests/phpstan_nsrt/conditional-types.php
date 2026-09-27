@@ -33,7 +33,7 @@ abstract class Test
 		assertType('non-empty-list<(int|string)>', $this->arrayKeys($nonEmptyArray));
 		assertType('non-empty-list<int>', $this->arrayKeys($nonEmptyIntArray));
 
-		assertType('list<*NEVER*>', $this->arrayKeys($emptyArray)); // SKIP: a template bound through another template's bound from an empty array does not bind never
+		assertType('list<*NEVER*>', $this->arrayKeys($emptyArray));
 	}
 
 	/**
@@ -92,7 +92,7 @@ abstract class Test
 
 	public function testMissingParameter(): void
 	{
-		assertType('int|string', $this->missingParameter()); // SKIP: a conditional on a name that is not a parameter picks the else branch instead of both
+		assertType('int|string', $this->missingParameter());
 	}
 
 	/**
@@ -102,7 +102,7 @@ abstract class Test
 
 	public function testDeterministicReturnValue(): void
 	{
-		assertType('true', $this->deterministicReturnValue()); // SKIP: a conditional type whose subject is a literal is not evaluated
+		assertType('true', $this->deterministicReturnValue());
 	}
 
 	/**
@@ -112,9 +112,9 @@ abstract class Test
 	 */
 	public function testDeterministicParameter($foo, $bar, $baz): void
 	{
-		assertType('string', $foo); // SKIP: a conditional type whose subject is a literal is not evaluated
-		assertType('string', $bar); // SKIP: a conditional type whose subject is a literal is not evaluated
-		assertType('string', $baz); // SKIP: a conditional type whose subject is a literal is not evaluated
+		assertType('string', $foo);
+		assertType('string', $bar);
+		assertType('string', $baz);
 	}
 
 	/**

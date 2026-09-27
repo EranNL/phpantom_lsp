@@ -134,6 +134,29 @@ impl PhpType {
         }
     }
 
+    /// Rename the `$parameter` subjects of every conditional in this type
+    /// through `rename`, which answers `None` for a name it keeps.
+    ///
+    /// An override inherits its ancestor's docblock but may call the
+    /// parameters something else, and a conditional names its subject by
+    /// the ancestor's spelling.
+    pub fn rename_conditional_params(&self, rename: &dyn Fn(&str) -> Option<Atom>) -> PhpType {
+        if !self.contains_conditional() {
+            return self.clone();
+        }
+        let renamed = self.map_children(&|child| child.rename_conditional_params(rename));
+        match renamed.raw_kind() {
+            TypeKind::Conditional(c) => match rename(&c.param) {
+                Some(param) => PhpType::conditional_type(ConditionalType {
+                    param,
+                    ..(**c).clone()
+                }),
+                None => renamed,
+            },
+            _ => renamed,
+        }
+    }
+
     /// Produce a new `PhpType` with all class names resolved through
     /// the provided callback.
     ///

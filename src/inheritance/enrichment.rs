@@ -73,10 +73,24 @@ fn inherited_return_type(existing: &MethodInfo, ancestor: &MethodInfo) -> Option
         return None;
     }
 
-    let inherited = ancestor.return_type.as_ref()?;
+    let inherited = in_override_param_names(ancestor.return_type.as_ref()?, existing, ancestor);
     Some(match existing.native_return_type {
         Some(ref native) => inherited.without_alternatives_the_native_type_forbids(native),
-        None => inherited.clone(),
+        None => inherited,
+    })
+}
+
+/// `ty`, written in `ancestor`'s docblock, with each conditional that names
+/// one of `ancestor`'s parameters renamed to the parameter `existing`
+/// declares in the same position.
+fn in_override_param_names(ty: &PhpType, existing: &MethodInfo, ancestor: &MethodInfo) -> PhpType {
+    if !ty.contains_conditional() {
+        return ty.clone();
+    }
+    ty.rename_conditional_params(&|name| {
+        let position = ancestor.parameters.iter().position(|p| p.name == name)?;
+        let renamed = existing.parameters.get(position)?.name;
+        (renamed != name).then_some(renamed)
     })
 }
 
@@ -255,8 +269,11 @@ pub(crate) fn enrich_method_from_ancestor(existing: &mut MethodInfo, ancestor: &
     }
 
     // ── Conditional return type ─────────────────────────────────
-    if existing.conditional_return.is_none() && ancestor.conditional_return.is_some() {
-        existing.conditional_return = ancestor.conditional_return.clone();
+    if existing.conditional_return.is_none()
+        && let Some(ref conditional) = ancestor.conditional_return
+    {
+        existing.conditional_return =
+            Some(in_override_param_names(conditional, existing, ancestor));
     }
 
     // ── Type assertions ─────────────────────────────────────────

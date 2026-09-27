@@ -75,10 +75,10 @@ function () {
 	assertType('AssertThis\\Result<int, string>', $result);
 	
 	if ($result->isOk()) {
-		assertType('AssertThis\\Ok<int>', $result); // SKIP: a narrowing to a generic class through an assertion on $this loses the template arguments
+		assertType('AssertThis\\Ok<int>', $result);
 		assertType('int', $result->unwrap());
 	} else { 
-		assertType('AssertThis\\Err<string>', $result); // SKIP: a narrowing to a generic class through an assertion on $this loses the template arguments
+		assertType('AssertThis\\Err<string>', $result);
 		assertType('never', $result->unwrap());
 	}
 };

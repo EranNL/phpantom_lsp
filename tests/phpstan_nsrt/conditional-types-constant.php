@@ -15,8 +15,8 @@ abstract class Test
 
 	public function test(): void
 	{
-		assertType('true', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(PREG_SPLIT_NO_EMPTY)); // SKIP: a global constant as a conditional return type's target is not resolved to its value
-		assertType('true', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(1)); // SKIP: a global constant as a conditional return type's target is not resolved to its value
+		assertType('true', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(PREG_SPLIT_NO_EMPTY));
+		assertType('true', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(1));
 		assertType('false', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(PREG_SPLIT_OFFSET_CAPTURE));
 		assertType('false', $this->returnsTrueForPREG_SPLIT_NO_EMPTY(4));
 		assertType('bool', $this->returnsTrueForPREG_SPLIT_NO_EMPTY($_GET['flag']));
