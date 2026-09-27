@@ -1,9 +1,11 @@
 use super::*;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 use mago_span::HasSpan;
 use mago_syntax::cst::argument::Argument;
 use mago_syntax::cst::sequence::TokenSeparatedSequence;
+use mago_syntax::cst::variable::Variable;
 
 use crate::atom::bytes_to_str;
 use crate::parser::{extract_hint_type, with_parsed_program};
@@ -69,7 +71,7 @@ pub(crate) fn walk_body_for_diagnostics<'b>(
         // their parameter types added on top.  The body is fully
         // walked so that scope snapshots are recorded for every
         // statement inside the closure/arrow function.
-        walk_closures_in_statement(stmt, &pre_stmt_scope, ctx);
+        walk_closures_in_statement(stmt, &pre_stmt_scope, scope, ctx);
 
         // Also record at the statement's end offset, which covers
         // member accesses that appear after the last statement in
@@ -94,11 +96,14 @@ pub(crate) fn walk_body_for_diagnostics<'b>(
 pub(crate) fn walk_closures_in_statement<'b>(
     stmt: &'b Statement<'b>,
     outer_scope: &ScopeState,
+    post_stmt_scope: &ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
     match stmt {
         Statement::Expression(expr_stmt) => {
-            walk_closures_in_expr(expr_stmt.expression, outer_scope, ctx, None);
+            let scope_for_walk =
+                self_ref_capture_scope(expr_stmt.expression, outer_scope, post_stmt_scope);
+            walk_closures_in_expr(expr_stmt.expression, &scope_for_walk, ctx, None);
         }
         Statement::Return(ret) => {
             if let Some(val) = ret.value {
@@ -142,6 +147,56 @@ pub(crate) fn walk_closures_in_statement<'b>(
         }
         _ => {}
     }
+}
+
+/// `outer_scope` is a pre-assignment snapshot, which is right for a
+/// closure's `use` variables in general (a plain, non-reference capture of
+/// `$x` in `$x = f($x, function () use ($x) { ... })` must see `$x`'s old
+/// value). But a closure that captures *by reference* the very variable
+/// its literal is being assigned to —
+/// `$callback = function () use (&$callback) { ...$callback... };` —
+/// is different: PHP creates the closure and only then stores it into
+/// `$callback`, so by the time the body ever runs, the reference sees the
+/// closure itself, not whatever `$callback` held (or didn't) before this
+/// statement. `post_stmt_scope` already has the correct, fully-resolved
+/// type for that case (computed by the same assignment pipeline that
+/// would have handled a distinct variable), so borrow it from there
+/// instead of falling into `seed_closure_captures`'s undefined-by-ref-
+/// capture-is-`null` default.
+fn self_ref_capture_scope<'a>(
+    expr: &Expression<'_>,
+    outer_scope: &'a ScopeState,
+    post_stmt_scope: &ScopeState,
+) -> Cow<'a, ScopeState> {
+    let Expression::Assignment(assignment) = expr else {
+        return Cow::Borrowed(outer_scope);
+    };
+    let (Expression::Variable(Variable::Direct(var)), Expression::Closure(closure)) =
+        (assignment.lhs, assignment.rhs)
+    else {
+        return Cow::Borrowed(outer_scope);
+    };
+    let var_name = bytes_to_str(var.name);
+    if !outer_scope.get(var_name).is_empty() {
+        // Already has a type in the pre-assignment scope (e.g. a loop
+        // reassigning the same closure); nothing to fix up.
+        return Cow::Borrowed(outer_scope);
+    }
+    let captures_self_by_ref = closure.use_clause.as_ref().is_some_and(|use_clause| {
+        use_clause.variables.iter().any(|use_var| {
+            use_var.ampersand.is_some() && bytes_to_str(use_var.variable.name) == var_name
+        })
+    });
+    if !captures_self_by_ref {
+        return Cow::Borrowed(outer_scope);
+    }
+    let resolved = post_stmt_scope.get(var_name);
+    if resolved.is_empty() {
+        return Cow::Borrowed(outer_scope);
+    }
+    let mut seeded = outer_scope.clone();
+    seeded.set(var_name, resolved.to_vec());
+    Cow::Owned(seeded)
 }
 
 /// Recursively scan an expression tree for closures/arrow functions
@@ -1148,7 +1203,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                     record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
                     let pre_stmt_scope = top_level_scope.clone();
                     process_statement(stmt, &mut top_level_scope, &ctx);
-                    walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
+                    walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
                     record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
                 }
                 if diag_ctx.wants(stmt.span()) {
@@ -1171,7 +1226,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 record_scope_snapshot(stmt.span().start.offset, &top_level_scope);
                 let pre_stmt_scope = top_level_scope.clone();
                 process_statement(stmt, &mut top_level_scope, &ctx);
-                walk_closures_in_statement(stmt, &pre_stmt_scope, &ctx);
+                walk_closures_in_statement(stmt, &pre_stmt_scope, &top_level_scope, &ctx);
                 record_scope_snapshot(stmt.span().end.offset, &top_level_scope);
             }
         }

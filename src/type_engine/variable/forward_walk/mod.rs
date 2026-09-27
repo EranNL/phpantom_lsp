@@ -242,7 +242,7 @@ pub(crate) fn walk_body_forward<'b>(
         // block.
         if record_snapshots {
             let closure_scope = pre_stmt_scope.as_ref().unwrap_or(scope);
-            walk_closures_in_statement(stmt, closure_scope, ctx);
+            walk_closures_in_statement(stmt, closure_scope, scope, ctx);
             record_scope_snapshot(stmt_span.end.offset, scope);
         }
     }

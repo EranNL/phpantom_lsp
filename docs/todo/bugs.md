@@ -186,17 +186,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B508. A closure that captures its own variable by reference is typed `null` inside its body
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-$callback = function () use (&$callback, $loop): void {
-    $loop->addTimer(1.0, $callback); // reported: expects callable, got null
-};
-```
-
-PHP creates `$callback` as `null` when the closure literal runs, but the assignment stores the closure into it before the body can ever execute, so inside the body it is the closure. Treating the capture as `null` is right only when nothing assigns the variable afterwards. This appeared with the change that types an undefined by-reference capture as `null`, and shows as three false positives in phpstan-src (`src/Command/FixerApplication.php`, `monitorFileChanges()`).
-
 ### B510. An overriding method's narrower return type is lost on some call sites
 **Impact: Medium · Complexity: Unknown**
 
