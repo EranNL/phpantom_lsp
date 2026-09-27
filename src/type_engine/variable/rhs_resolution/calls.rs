@@ -494,31 +494,94 @@ pub(crate) fn infer_closure_literal_type(
         })
     };
 
-    let inferred_return = explicit_or_yield.or_else(|| match expr {
-        Expression::ArrowFunction(arrow) => {
-            let resolved = resolve_rhs_expression(arrow.expression, ctx);
-            if resolved.is_empty() {
-                None
-            } else {
-                Some(ResolvedType::types_joined(&resolved))
-            }
-        }
-        // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
-        // `ClassName::method(...)`.  Resolve the underlying function/method's
-        // return type from the callable's own source text.
-        Expression::PartialApplication(_) => {
-            let span = expr.span();
-            let start = (span.start.offset as usize).min(ctx.content.len());
-            let end = (span.end.offset as usize).min(ctx.content.len());
-            ctx.content.get(start..end).and_then(|text| {
-                let rctx = ctx.as_resolution_ctx();
-                crate::completion::source::helpers::resolve_first_class_callable_return_type(
-                    text, &rctx,
-                )
+    // What the body actually produces, independent of any declared
+    // return type: an arrow function's expression, or a full closure
+    // body's first top-level `return`.
+    let body_return = || -> Option<PhpType> {
+        let (parameter_list, ret_expr) = match expr {
+            Expression::ArrowFunction(arrow) => (&arrow.parameter_list, Some(arrow.expression)),
+            Expression::Closure(closure) => (
+                &closure.parameter_list,
+                closure.body.statements.iter().find_map(|stmt| match stmt {
+                    Statement::Return(ret) => ret.value,
+                    _ => None,
+                }),
+            ),
+            _ => return None,
+        };
+        let ret_expr = ret_expr?;
+
+        // The body may read the closure's own parameters (`fn (?string
+        // $value): string => $value ?? '-'`), which nothing outside the
+        // closure ever assigns, so the outer scope's variable resolution
+        // cannot see them. Seed each hinted one so the body resolves
+        // against its own signature the way a call to it would.
+        let param_types: HashMap<String, PhpType> = parameter_list
+            .parameters
+            .iter()
+            .filter_map(|param| {
+                let hint = param.hint.as_ref()?;
+                let name = bytes_to_str(param.variable.name).to_string();
+                let ty = crate::util::resolve_source_php_type_names(
+                    &crate::parser::extract_hint_type(hint),
+                    ctx.current_class.file_namespace.as_deref(),
+                    ctx.class_loader,
+                );
+                Some((name, ty))
             })
+            .collect();
+
+        let resolved = if param_types.is_empty() {
+            resolve_rhs_expression(ret_expr, ctx)
+        } else {
+            let param_aware_resolver = |name: &str| -> Vec<ResolvedType> {
+                match param_types.get(name) {
+                    Some(ty) => vec![ResolvedType::from_type_string(ty.clone())],
+                    None => resolve_var_types(name, ctx, ctx.cursor_offset),
+                }
+            };
+            let mut param_ctx = ctx.clone();
+            param_ctx.scope_var_resolver = Some(&param_aware_resolver);
+            resolve_rhs_expression(ret_expr, &param_ctx)
+        };
+
+        if resolved.is_empty() {
+            None
+        } else {
+            Some(ResolvedType::types_joined(&resolved))
         }
-        _ => None,
-    });
+    };
+
+    let inferred_return = match explicit_or_yield {
+        // A closure really returns what its body produces narrowed by
+        // what it declares: an explicit `: ReturnType` only wins when
+        // the body does not resolve to something narrower (e.g. a bare
+        // `: Closure` on a closure whose body returns a closure with a
+        // known signature).
+        Some(declared) => {
+            let narrowed = body_return().filter(|body| {
+                crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
+            });
+            Some(narrowed.unwrap_or(declared))
+        }
+        None => body_return().or_else(|| match expr {
+            // First-class callable syntax: `strlen(...)`, `$this->method(...)`,
+            // `ClassName::method(...)`.  Resolve the underlying function/method's
+            // return type from the callable's own source text.
+            Expression::PartialApplication(_) => {
+                let span = expr.span();
+                let start = (span.start.offset as usize).min(ctx.content.len());
+                let end = (span.end.offset as usize).min(ctx.content.len());
+                ctx.content.get(start..end).and_then(|text| {
+                    let rctx = ctx.as_resolution_ctx();
+                    crate::completion::source::helpers::resolve_first_class_callable_return_type(
+                        text, &rctx,
+                    )
+                })
+            }
+            _ => None,
+        }),
+    };
 
     // `static` in a closure's declared return type binds to the class the
     // closure is lexically declared in, the same way it does for a method.

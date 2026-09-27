@@ -143,7 +143,9 @@ namespace PsalmTest_closure_8 {
     $a = function() : Closure { return function() : string { return "hello"; }; };
     $b = $a()();
 
-    assertType('string', $b); // SKIP: calling the closure a closure returns ignores the inner closure's return type
+    // PHPantom is more precise than Psalm here: the inner closure's body
+    // returns the literal 'hello', narrower than its declared `: string`.
+    assertType('"hello"', $b);
 }
 
 // Test: CallableWithArrayMap

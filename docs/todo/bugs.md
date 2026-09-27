@@ -65,7 +65,54 @@ No outstanding items.
 
 ## Symbol resolution
 
-No outstanding items.
+### B540. A closure's declared parameter/return classes resolve against the wrong namespace when short names repeat across the file
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+namespace PsalmTest_closure_5 {
+    class A {}
+    class B {}
+    class C {}
+}
+
+namespace PsalmTest_closure_6 {
+    class A {}
+    class B {}
+    class C {}
+    class C2 extends C {}
+
+    /**
+     * @param Closure(B):A $f
+     * @param Closure(C):B $g
+     * @return Closure(C2):A
+     */
+    function foo(Closure $f, Closure $g): Closure {
+        return function (C $x) use ($f, $g): A {
+            return $f($g($x));
+        };
+        // Return type Closure(PsalmTest_closure_5\C): PsalmTest_closure_5\A
+        // is incompatible with declared return type
+        // PsalmTest_closure_6\Closure(PsalmTest_closure_6\C2): PsalmTest_closure_6\A
+        //
+        // Should resolve C/A against PsalmTest_closure_6, the namespace the
+        // closure literal is actually written in.
+    }
+}
+```
+
+The inner closure's native `C`/`A` hints get qualified against
+`PsalmTest_closure_5`, an unrelated namespace earlier in the same file that
+happens to declare classes with the same short names, instead of
+`PsalmTest_closure_6`, the namespace the closure literal is lexically in.
+The same file shows it corrupting `type_mismatch_argument` diagnostics too
+(lines 107-108, 134-136 of the file below), always pulling from
+`PsalmTest_closure_5` regardless of which later namespace the mismatched
+call actually lives in.
+
+Found while fixing B536, in `tests/psalm_assertions/closure.php`
+(`returnsTypedClosureWithSubclassParam` and later namespaces in the same
+file). Not yet isolated to a root cause.
 
 ## Array types
 
@@ -224,20 +271,3 @@ $h = $test(...);           // same, for an object with __invoke(): int
 literal value, and an invokable object, do not.
 
 Found porting Psalm's `ClosureTest.php`.
-
-### B536. Calling the closure a closure returns ignores the inner closure's return type
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$a = function (): Closure { return function (): string { return 'hello'; }; };
-$b = $a()();
-// mixed, should be string
-```
-
-The outer closure declares a bare `Closure`, so its call resolves to that.
-Its body returns a closure whose signature is known, and a closure's real
-return type is the narrower of what it declares and what its body produces
-(the rule `array_map` callbacks already follow).
-
-Found porting Psalm's `ClosureTest.php` (`singleLineClosures`).

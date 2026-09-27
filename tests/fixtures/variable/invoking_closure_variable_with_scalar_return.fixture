@@ -6,7 +6,7 @@
 
 function test(): void
 {
-    $c = function (): string { return ''; };
+    $c = function (): string { return strval(rand()); };
     $s = $c();
     echo $<>s;
 }
