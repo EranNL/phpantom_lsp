@@ -68,7 +68,7 @@ namespace PsalmTest_php70_5 {
     $var = 0;
     ($a =& $var) ?? "hello";
 
-    assertType('0', $a); // SKIP: a reference assigned inside `??`'s left operand takes the fallback's type
+    assertType('0', $a);
 }
 
 // Test: spaceship

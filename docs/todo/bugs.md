@@ -147,15 +147,3 @@ each `return` has to contribute to the join too. The reading narrows the
 declared `@param-out int`, so the wrong literal comes out looking precise.
 
 Found porting Psalm's `ReferenceConstraintTest.php`.
-
-### B533. A reference assigned inside `??`'s left operand takes the fallback's type
-
-**Impact: Low · Complexity: Low**
-
-```php
-$var = 0;
-($a =& $var) ?? 'hello';
-// $a: string, should be 0
-```
-
-Found porting Psalm's `Php70Test.php` (`nullCoalesceWithReference`).

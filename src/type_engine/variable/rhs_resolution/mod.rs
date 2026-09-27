@@ -735,12 +735,21 @@ fn coalesce_assign_value(
 }
 
 /// Strip wrappers that cannot change the type of the expression they
-/// wrap: parentheses and the error-suppression operator `@`.
+/// wrap: parentheses, the error-suppression operator `@`, and `&`.
+///
+/// `&$expr` used as a value (`$a =& $var`'s own value, an argument to a
+/// legacy by-ref call) is whatever `$expr` currently holds; the operator
+/// only affects how the *target* is bound, which is the forward walker's
+/// concern (`process_nested_assignments` / `process_assignment_expr`),
+/// not this read-only pipeline's.
 fn peel_type_transparent<'b>(mut expr: &'b Expression<'b>) -> &'b Expression<'b> {
     loop {
         match expr {
             Expression::Parenthesized(parenthesized) => expr = parenthesized.expression,
-            Expression::UnaryPrefix(unary) if unary.operator.is_error_control() => {
+            Expression::UnaryPrefix(unary)
+                if unary.operator.is_error_control()
+                    || matches!(unary.operator, unary::UnaryPrefixOperator::Reference(_)) =>
+            {
                 expr = unary.operand
             }
             _ => return expr,
