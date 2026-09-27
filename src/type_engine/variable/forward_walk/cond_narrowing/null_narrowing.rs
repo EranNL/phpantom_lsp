@@ -91,6 +91,9 @@ pub(crate) fn apply_null_narrowing_truthy<'b>(
     // `$x === $y` — the same reasoning for any comparand whose own type
     // rules out null.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, true);
+    // `$x === $y` where `$y` has already been narrowed to a single
+    // literal — `$x` holds that same literal.
+    apply_identity_comparison_literal_narrowing(condition, scope, ctx, true);
     // `!empty($x)` — truthy branch means $x is non-empty (truthy):
     // strip null and false from the type.
     if let Some(var_name) = extract_not_empty_var(condition) {
@@ -196,6 +199,9 @@ pub(crate) fn apply_null_narrowing_inverse<'b>(
     // the two were identical, so a comparand that cannot be null leaves
     // no null in the subject.
     apply_identity_comparison_null_narrowing(condition, scope, ctx, false);
+    // Same reasoning as the truthy branch, for a comparand already
+    // narrowed to a single literal.
+    apply_identity_comparison_literal_narrowing(condition, scope, ctx, false);
     // When the condition is `$x === ''` / `$x === []`, the inverse
     // (else/guard) means $x is non-empty; when it is `$x !== ''`, the
     // inverse means $x is exactly the empty value.

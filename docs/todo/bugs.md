@@ -37,26 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B518. `===` against a literal-typed variable does not narrow the other side
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @return positive-int */
-function getPositiveInt(): int { return 2; }
-
-$a = 2;
-$b = getPositiveInt();
-assert($a === $b);
-$b; // positive-int, should be 2
-```
-
-An identity check narrows both operands to what they share. Against a
-literal written inline (`$b === 2`) that already happens; against a
-variable that holds the literal it does not.
-
-Found porting Psalm's `TypeReconciliation/ConditionalTest.php`
-(`assertionsWorksBothWays`).
+No outstanding items.
 
 ## Arithmetic
 

@@ -296,7 +296,7 @@ namespace PsalmTest_type_reconciliation_conditional_20 {
     }
 
     assertType('2', $a);
-    assertType('2', $b); // SKIP: `===` against a literal-typed variable does not narrow the other side to that literal
+    assertType('2', $b);
 }
 
 // Test: hypotheticalElseDoesNotLeak
