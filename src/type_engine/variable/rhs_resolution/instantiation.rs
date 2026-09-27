@@ -297,6 +297,25 @@ pub(super) fn resolve_rhs_instantiation(
     // use it to resolve the instantiated type.
     if let Expression::Variable(Variable::Direct(dv)) = inst.class {
         let var_name = bytes_to_str(dv.name).to_string();
+
+        // `new $class` on a `class-string<T>` of a bounded template builds
+        // a `T`, whatever classes its bound resolves to.
+        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
+        if let [only] = var_types.as_slice()
+            && let TypeKind::ClassString(Some(inner)) = only.type_string.kind()
+            && inner.as_template_param().is_some()
+        {
+            let classes = crate::type_engine::type_resolution::type_hint_to_classes_typed(
+                inner,
+                &ctx.current_class.name,
+                ctx.all_classes,
+                ctx.class_loader,
+            );
+            if !classes.is_empty() {
+                return ResolvedType::from_classes_with_hint(classes, inner.clone());
+            }
+        }
+
         let resolved =
             crate::type_engine::variable::class_string_resolution::resolve_class_string_targets(
                 &var_name,
@@ -315,7 +334,6 @@ pub(super) fn resolve_rhs_instantiation(
         // type from `class-string<T>`.  This handles parameters typed
         // as `@param class-string<Foo> $var` where there is no
         // `$var = Foo::class` assignment.
-        let var_types = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
         let class_name = extract_class_string_inner(&var_types);
         if let Some(name) = class_name
             && let Some(cls) = (ctx.class_loader)(&name)

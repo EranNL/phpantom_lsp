@@ -118,7 +118,6 @@ unlikely to move the needle for most users.
 | B491 | [The receiver of a nullsafe call is not narrowed inside its arguments](todo/bugs.md#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments) | Low | Low-Medium |
 | B502 | [A global constant as a conditional type's target is not resolved to its value](todo/bugs.md#b502-a-global-constant-as-a-conditional-types-target-is-not-resolved-to-its-value) | Low | Low-Medium |
 | B504 | [A conditional type whose subject is a literal is not evaluated](todo/bugs.md#b504-a-conditional-type-whose-subject-is-a-literal-is-not-evaluated) | Low | Low-Medium |
-| B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | High |
 | B483 | [`preg_replace()` over an array shape loses its keys](todo/bugs.md#b483-preg_replace-over-an-array-shape-loses-its-keys) | Low | Medium |
 | B485 | [`array_shift()` does not drop the first entry of a list shape](todo/bugs.md#b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape) | Low | Medium |
 | B487 | [An impure call does not forget what was proved about a static property](todo/bugs.md#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property) | Low | Medium |

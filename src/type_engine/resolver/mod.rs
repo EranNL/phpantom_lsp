@@ -939,10 +939,18 @@ fn resolve_target_classes_expr_inner(
                 None
             };
 
-            let candidates = property_raw_type
-                .into_iter()
-                .chain(docblock_type)
-                .chain(ast_type);
+            // The annotation goes first because the walker can lose its
+            // generics on the way through, but a walker type that refines
+            // the annotation is the annotation read further (an `@var
+            // array<T>` whose `T` it knows the bound of, a shape a guard
+            // has narrowed) and describes the value better.
+            let (first, second) = match (docblock_type, ast_type) {
+                (Some(doc), Some(ast)) if ast != doc && ast.is_subtype_of(&doc) => {
+                    (Some(ast), Some(doc))
+                }
+                (doc, ast) => (doc, ast),
+            };
+            let candidates = property_raw_type.into_iter().chain(first).chain(second);
 
             if let Some(resolved) =
                 crate::completion::source::helpers::try_chained_array_access_with_candidates(

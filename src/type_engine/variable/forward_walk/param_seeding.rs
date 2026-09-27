@@ -314,13 +314,23 @@ pub(crate) fn resolve_param_type(
         })
         .map(accept_default);
 
-    // Check the `@param` docblock annotation.
-    let raw_docblock_type = super::super::resolution::declared_param_docblock_type(
+    // Check the `@param` docblock annotation.  The declaration's bounded
+    // templates are marked with their bounds before the docblock is
+    // weighed against the native hint, so `@param T $foo` on `int $foo`
+    // (`@template T of int`) is judged by what `T` is known to be.
+    let unmarked_docblock_type = super::super::resolution::declared_param_docblock_type(
         ctx.content,
         method_span_start as usize,
         pname,
     )
     .map(|t| resolve_docblock_param_type(&t, ctx));
+    let raw_docblock_type = unmarked_docblock_type.clone().map(|t| {
+        super::super::resolution::substitute_template_param_bounds(
+            t,
+            ctx.content,
+            method_span_start as usize,
+        )
+    });
 
     // With no `@param` of its own, an override inherits the ancestor's,
     // which `@extends`/`@implements` template substitution may have
@@ -439,13 +449,15 @@ pub(crate) fn resolve_param_type(
         )
     } else if let Some(ref eff) = effective_type
         && (trait_refinement.is_some()
-            || raw_docblock_type.as_ref().is_some_and(|rdt| *rdt != *eff))
+            || unmarked_docblock_type
+                .as_ref()
+                .is_some_and(|rdt| *rdt != *eff))
     {
-        // The effective type differs from the raw docblock type, meaning
-        // template substitution produced a concrete type (e.g. `K` →
-        // `array-key`).  Use the substituted type so that downstream
-        // narrowing (type guards, instanceof) operates on the concrete
-        // type rather than the bare template parameter name.
+        // The effective type differs from the docblock type as written,
+        // meaning template marking produced a bounded type (e.g. `K` →
+        // `K of array-key`).  Use it so that downstream narrowing (type
+        // guards, instanceof) operates on the bound rather than on a bare
+        // template parameter name nothing can resolve.
         vec![ResolvedType::from_type_string(eff.clone())]
     } else if let Some(ref rdt) = raw_docblock_type {
         let parsed_docblock = rdt.clone();

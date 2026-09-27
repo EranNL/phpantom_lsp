@@ -783,6 +783,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
                 enclosing_return_type: None,
                 top_level_scope: None,
                 in_loop: false,
+                template_markers: None,
             };
             let mut tl_scope = super::forward_walk::ScopeState::new();
             super::forward_walk::walk_top_level_for_globals(
@@ -940,6 +941,7 @@ pub(in crate::type_engine) fn resolve_variable_in_statements<'b>(
             enclosing_return_type: None,
             top_level_scope: None,
             in_loop: false,
+            template_markers: None,
         };
         if let Some(fw_results) =
             super::forward_walk::resolve_in_top_level(ctx.var_name, stmts.iter().copied(), &fw_ctx)
@@ -1209,6 +1211,7 @@ fn try_resolve_in_function(
         enclosing_return_type: enclosing_ret,
         top_level_scope: ctx.top_level_scope.clone(),
         in_loop: false,
+        template_markers: None,
     };
     Some(
         super::forward_walk::resolve_in_function_body(ctx.var_name, func, &fw_ctx)
@@ -1363,6 +1366,7 @@ fn resolve_variable_in_members<'b>(
                         enclosing_return_type: enclosing_ret,
                         top_level_scope: ctx.top_level_scope.clone(),
                         in_loop: false,
+                        template_markers: None,
                     };
                     let method_name_str = bytes_to_str(method.name.value).to_string();
                     let is_static = method.modifiers.contains_static();
@@ -1430,6 +1434,7 @@ fn resolve_variable_in_property_hooks(
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
+            template_markers: None,
         };
 
         let mut scope = super::forward_walk::seed_property_hook_scope(property_hint, hook, &fw_ctx);
@@ -1484,6 +1489,7 @@ fn resolve_abstract_method_param(
             enclosing_return_type: None,
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
+            template_markers: None,
         };
 
         let trait_prototype =
@@ -1505,14 +1511,16 @@ fn resolve_abstract_method_param(
     vec![]
 }
 
-/// Substitute method/function-level template parameter names with their
-/// upper bounds from `@template T of Bound` annotations.
+/// Mark the method/function-level template parameters a type names with
+/// the upper bounds their `@template T of Bound` annotations give them.
 ///
 /// This handles the general case where a parameter type IS a template
 /// parameter (e.g. `@param T $query` where `@template T of Builder`).
-/// Without this substitution, `T` remains an unresolvable named type
-/// and member access on `$query` fails with "subject type 'T' could not
-/// be resolved".
+/// A bare `T` is an unresolvable named type, so member access on `$query`
+/// would fail with "subject type 'T' could not be resolved".  Each bounded
+/// `T` becomes a [`TemplateParam`](crate::php_type::TypeKind::TemplateParam)
+/// instead, which is still displayed and substituted as `T` but resolves
+/// as its bound, wherever the value travels.
 ///
 /// Works on any `PhpType` structure — bare names, unions, intersections,
 /// nullable wrappers, generics, etc. — via `PhpType::substitute`.
@@ -1541,18 +1549,56 @@ pub(super) fn substitute_template_param_bounds(
         return ty;
     }
 
-    let mut subs = std::collections::HashMap::new();
-    for (name, bound) in bounds {
-        if let Some(bound_type) = bound {
-            subs.insert(name, bound_type);
-        }
-    }
-
+    let subs = bounded_template_markers(bounds);
     if subs.is_empty() {
         return ty;
     }
 
     ty.substitute(&subs)
+}
+
+/// The markers [`bounded_template_markers`] builds for the declaration
+/// starting at `decl_start`, or `None` when it declares no bounded template.
+pub(crate) fn declaration_template_markers(
+    content: &str,
+    decl_start: usize,
+) -> Option<std::sync::Arc<std::collections::HashMap<String, PhpType>>> {
+    let docblock = extract_preceding_docblock(content.get(..decl_start)?)?;
+    if !docblock.contains("template") {
+        return None;
+    }
+    let markers = bounded_template_markers(docblock::extract_template_params_with_bounds(docblock));
+    (!markers.is_empty()).then(|| std::sync::Arc::new(markers))
+}
+
+/// The [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) each
+/// bounded template in `bounds` stands for, keyed by its name.
+///
+/// A bound naming another of the declaration's templates (`@template U of
+/// T`) reads through to that template's own bound, so `U` still resolves
+/// to a class.
+fn bounded_template_markers(
+    bounds: Vec<(String, Option<PhpType>)>,
+) -> std::collections::HashMap<String, PhpType> {
+    let mut subs: std::collections::HashMap<String, PhpType> = bounds
+        .into_iter()
+        .filter_map(|(name, bound)| {
+            let bound = bound?;
+            let marker = PhpType::template_param(crate::atom::atom(&name), bound);
+            Some((name, marker))
+        })
+        .collect();
+    let chained: Vec<(String, PhpType)> = subs
+        .iter()
+        .filter_map(|(name, marker)| {
+            let (tpl, bound) = marker.as_template_param()?;
+            let substituted = bound.substitute(&subs);
+            (substituted != *bound)
+                .then(|| (name.clone(), PhpType::template_param(tpl, substituted)))
+        })
+        .collect();
+    subs.extend(chained);
+    subs
 }
 
 /// Whether `ty` names one of the `@template` parameters the declaration
@@ -1592,8 +1638,8 @@ fn type_may_contain_template_param(ty: &PhpType) -> bool {
     }
 }
 
-/// Substitute method-level template parameters inside `class-string<T>`
-/// types with their upper bounds from `@template T of Bound` annotations.
+/// Mark method-level template parameters inside `class-string<T>` types
+/// with their upper bounds from `@template T of Bound` annotations.
 ///
 /// This enables `$class::` static member access resolution when the
 /// parameter is typed as `class-string<T>` and `T` is bounded by a
@@ -1629,15 +1675,10 @@ pub(super) fn substitute_class_string_template_bounds(
     };
 
     let bounds = docblock::extract_template_params_with_bounds(docblock);
-    for (name, bound) in bounds {
-        if name == tpl_name
-            && let Some(bound_type) = bound
-        {
-            return PhpType::class_string(Some(bound_type));
-        }
+    match bounded_template_markers(bounds).remove(tpl_name.as_str()) {
+        Some(marker) => PhpType::class_string(Some(marker)),
+        None => ty,
     }
-
-    ty
 }
 
 /// The `@param` type the declaration starting at `decl_start` gives

@@ -14,9 +14,9 @@ class Foo
 	 */
 	public function foo($test)
 	{
-		assertType('T of int|string (method Bug5562\Foo::foo(), argument)', $test); // SKIP: a method template with a bound is shown as its bound inside the method
+		assertType('T of int|string (method Bug5562\Foo::foo(), argument)', $test);
 		$bar = $this->bar($test);
-		assertType('T of int|string (method Bug5562\Foo::foo(), argument)', $bar); // SKIP: a method template with a bound is shown as its bound inside the method
+		assertType('T of int|string (method Bug5562\Foo::foo(), argument)', $bar);
 
 		return $bar;
 	}

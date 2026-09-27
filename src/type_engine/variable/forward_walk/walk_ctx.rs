@@ -3,6 +3,7 @@
 //! statement and expression handler reads.
 
 use super::*;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::atom::AtomMap;
@@ -55,6 +56,12 @@ pub(crate) struct ForwardWalkCtx<'a> {
     /// re-walk instead of settling). See
     /// `array_shape_writes::merge_nested_array_write`.
     pub in_loop: bool,
+    /// The bounded `@template` parameters of the function or method whose
+    /// body is being walked, each mapped to its
+    /// [`TemplateParam`](crate::php_type::TypeKind::TemplateParam) marker.
+    /// An inline `@var` naming one of them is read through this, so an
+    /// `@var array<T>` inside the body knows what its elements are.
+    pub template_markers: Option<Arc<HashMap<String, PhpType>>>,
 }
 
 impl<'a> ForwardWalkCtx<'a> {
@@ -91,6 +98,7 @@ impl<'a> ForwardWalkCtx<'a> {
             enclosing_return_type: ctx.enclosing_return_type.clone(),
             top_level_scope: ctx.top_level_scope.clone(),
             in_loop: false,
+            template_markers: None,
         }
     }
 
@@ -113,6 +121,7 @@ impl<'a> ForwardWalkCtx<'a> {
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
             in_loop: self.in_loop,
+            template_markers: self.template_markers.clone(),
         }
     }
 
@@ -131,6 +140,23 @@ impl<'a> ForwardWalkCtx<'a> {
             enclosing_return_type: self.enclosing_return_type.clone(),
             top_level_scope: self.top_level_scope.clone(),
             in_loop,
+            template_markers: self.template_markers.clone(),
+        }
+    }
+
+    /// Return a copy of this context for walking the body of the
+    /// declaration starting at `decl_start`, with that declaration's
+    /// bounded templates as [`template_markers`](Self::template_markers).
+    pub(crate) fn for_declaration(&self, decl_start: u32) -> ForwardWalkCtx<'a> {
+        ForwardWalkCtx {
+            template_markers:
+                crate::type_engine::variable::resolution::declaration_template_markers(
+                    self.content,
+                    decl_start as usize,
+                ),
+            enclosing_return_type: self.enclosing_return_type.clone(),
+            top_level_scope: self.top_level_scope.clone(),
+            ..*self
         }
     }
 

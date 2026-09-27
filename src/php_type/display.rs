@@ -19,6 +19,8 @@ impl fmt::Display for PhpType {
                 _ => write!(f, "{inner}"),
             },
             TypeKind::Named(s) => write!(f, "{s}"),
+            // The value is the template, whatever it is known to be.
+            TypeKind::TemplateParam(name, _) => write!(f, "{name}"),
             TypeKind::StaticType(bound) => write!(f, "static({bound})"),
             TypeKind::ThisType(bound) => write!(f, "$this({bound})"),
 

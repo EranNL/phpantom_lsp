@@ -22,7 +22,7 @@ class A
  */
 function x($t): void
 {
-	assertType('class-string<T of Bug7823\\A (function Bug7823\\x(), argument)>', $t::class); // SKIP: a method template with a bound is shown as its bound inside the method
+	assertType('class-string<T of Bug7823\\A (function Bug7823\\x(), argument)>', $t::class);
 	sayHello($t::class);
 }
 

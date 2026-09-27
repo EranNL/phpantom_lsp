@@ -14333,3 +14333,48 @@ class Registry {
         "an assignment used as a call receiver must resolve to what it assigned, got: {diags:?}",
     );
 }
+
+/// Members of a bounded method template's bound resolve on everything
+/// derived from the parameter: the value itself, a foreach variable over
+/// `iterable<T>`, an element of an inline `@var array<T>`, and what a
+/// template-returning call hands back.
+#[test]
+fn no_unknown_member_on_bounded_method_template_values() {
+    let backend = create_test_backend();
+    let uri = "file:///bounded_method_template_members.php";
+    let text = r#"<?php
+interface Positioned { public function getPosition(): int; }
+class Sorter {
+    /**
+     * @template T of Positioned
+     * @param iterable<T> $items
+     * @param T $first
+     * @return array<T>
+     */
+    public function sort($items, $first) {
+        $first->getPosition();
+        /** @var array<T> $res */
+        $res = [];
+        foreach ($items as $item) {
+            $item->getPosition();
+            $res[$item->getPosition()] = $item;
+            $res[0]->getPosition();
+            $this->keep($item)->getPosition();
+        }
+        return $res;
+    }
+
+    /**
+     * @template S of Positioned
+     * @param S $value
+     * @return S
+     */
+    private function keep($value) { return $value; }
+}
+"#;
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "Bounded template values should resolve their bound's members, got: {diags:?}"
+    );
+}

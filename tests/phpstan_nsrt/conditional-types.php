@@ -124,7 +124,7 @@ abstract class Test
 	 */
 	public function testConditionalInParameter(int $foo, int $bar): void
 	{
-		assertType('TInt of int (method ConditionalTypes\Test::testConditionalInParameter(), argument)', $foo); // SKIP: a method template with a bound is shown as its bound inside the method
+		assertType('TInt of int (method ConditionalTypes\Test::testConditionalInParameter(), argument)', $foo);
 		// PHPantom treats integer ranges as int.
 		assertType('int', $bar);
 	}

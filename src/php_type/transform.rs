@@ -87,6 +87,7 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(map(inner)),
             TypeKind::ListShape(inner) => PhpType::as_list_shape(map(inner)),
+            TypeKind::TemplateParam(name, bound) => PhpType::template_param(*name, map(bound)),
             TypeKind::Nullable(inner) => PhpType::nullable(map(inner)),
             TypeKind::Union(types) => PhpType::union(types.iter().map(&map).collect()),
             TypeKind::Intersection(types) => {
@@ -373,6 +374,7 @@ impl PhpType {
             TypeKind::Raw(s) => self_constant_name(s).is_some(),
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner)
             | TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::KeyOf(inner)
@@ -486,6 +488,9 @@ impl PhpType {
                 inner.contains_name_matching(pred)
             }
             TypeKind::Named(s) => pred(s),
+            TypeKind::TemplateParam(name, bound) => {
+                pred(name) || bound.contains_name_matching(pred)
+            }
             TypeKind::Nullable(inner) => inner.contains_name_matching(pred),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 types.iter().any(|t| t.contains_name_matching(pred))
@@ -684,6 +689,13 @@ impl PhpType {
                 None => self.clone(),
             },
 
+            // A template seen from inside its declaration is still that
+            // template, so it answers to its name.
+            TypeKind::TemplateParam(name, bound) => match subs.get(name.as_str()) {
+                Some(replacement) => replacement.clone(),
+                None => PhpType::template_param(*name, bound.substitute(subs)),
+            },
+
             // A `Raw` node is text no type syntax covers, so it is only
             // opaque because nothing has said what it means; when `subs`
             // does, that reading wins.
@@ -810,9 +822,9 @@ impl PhpType {
     /// Recursive helper for [`extract_class_names`].
     fn collect_class_names(&self, names: &mut Vec<String>) {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.collect_class_names(names)
-            }
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner) => inner.collect_class_names(names),
             TypeKind::Named(s) => {
                 if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
                     names.push(s.to_string());

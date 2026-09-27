@@ -1050,6 +1050,7 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
         enclosing_return_type: None,
         top_level_scope: None,
         in_loop: false,
+        template_markers: None,
     };
 
     let mut top_level_scope = ScopeState::new();
@@ -1390,6 +1391,7 @@ impl<'a> DiagnosticWalkCtx<'a> {
             enclosing_return_type: None,
             top_level_scope: None,
             in_loop: false,
+            template_markers: None,
         }
     }
 }
@@ -1441,6 +1443,7 @@ pub(crate) fn seed_and_walk_function_body<'b>(
     #[cfg(test)]
     TEST_BODY_WALKS.with(|count| count.set(count.get() + 1));
 
+    let ctx = &ctx.for_declaration(fn_span_start);
     let mut scope = ScopeState::new();
 
     // Seed `$this` for non-static class methods so that expressions
@@ -1525,6 +1528,7 @@ pub(crate) fn walk_anonymous_class_member_bodies<'b>(
         enclosing_return_type: None,
         top_level_scope: None,
         in_loop: false,
+        template_markers: None,
     };
 
     for member in anon.members.iter() {

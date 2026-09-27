@@ -261,6 +261,7 @@ pub(crate) fn resolve_in_method_body<'b>(
     is_static: bool,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
+    let ctx = &ctx.for_declaration(method_span_start);
     let mut scope = ScopeState::new();
 
     let method_name = method_ctx.map(|(n, _)| n);
@@ -357,6 +358,7 @@ pub(crate) fn resolve_in_function_body<'b>(
     func: &'b Function<'b>,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Option<Vec<ResolvedType>> {
+    let ctx = &ctx.for_declaration(func.span().start.offset);
     let mut scope = ScopeState::new();
 
     seed_params(

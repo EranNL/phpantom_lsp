@@ -536,8 +536,14 @@ pub(crate) fn resolve_type_to_resolved_types(
     php_type: &PhpType,
     ctx: &ForwardWalkCtx<'_>,
 ) -> Vec<ResolvedType> {
+    // The declaration's templates are marked before names are qualified,
+    // while `T` is still spelled the way the `@template` tag spells it.
+    let marked = ctx
+        .template_markers
+        .as_ref()
+        .map(|m| php_type.substitute(m));
     let php_type = crate::util::resolve_source_php_type_names(
-        php_type,
+        marked.as_ref().unwrap_or(php_type),
         ctx.current_class.file_namespace.as_deref(),
         ctx.class_loader,
     );

@@ -14739,6 +14739,41 @@ fn hover_template_array_bound_identity_generic_resolves_inside_body() {
     );
 }
 
+/// A value typed by a bounded method template is still that template inside
+/// the method: hover names `T`, with its bound on the template line, rather
+/// than showing the bound as if it were the type.
+#[test]
+fn hover_bounded_method_template_value_shows_template_name() {
+    let backend = create_test_backend();
+    let uri = "file:///bounded_method_template.php";
+    let content = concat!(
+        "<?php\n",                                    // 0
+        "class Animal {}\n",                          // 1
+        "class Plant {}\n",                           // 2
+        "class Garden {\n",                           // 3
+        "    /**\n",                                  // 4
+        "     * @template T of Animal|Plant\n",       // 5
+        "     * @param iterable<T> $items\n",         // 6
+        "     */\n",                                  // 7
+        "    public function tend($items): void {\n", // 8
+        "        foreach ($items as $item) {\n",      // 9
+        "            $item;\n",                       // 10
+        "        }\n",                                // 11
+        "    }\n",                                    // 12
+        "}\n",                                        // 13
+    );
+    let hover = hover_at(&backend, uri, content, 10, 13).expect("hover $item");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("$item = T\n"),
+        "Should show the template name rather than its bound, got: {text}"
+    );
+    assert!(
+        !text.contains("$item = Animal"),
+        "Should not split the template into its bound's alternatives, got: {text}"
+    );
+}
+
 /// Hovering `$this->value` inside an anonymous class's own method resolves
 /// the property against the anonymous class, not the enclosing method's
 /// class.

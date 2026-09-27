@@ -31,19 +31,19 @@ abstract class HelloWorld
 			$position = $tgItem->getPosition();
 
 			if (!isset($res[$position])) {
-				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), argument)', $tgItem); // SKIP: a method template with a bound is shown as its bound inside the method
+				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), argument)', $tgItem);
 				$res[$position] = $tgItem;
 			} else {
-				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), argument)', $tgItem); // SKIP: a method template with a bound is shown as its bound inside the method
-				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $res[$position]); // SKIP: a method template with a bound is shown as its bound inside the method
+				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), argument)', $tgItem);
+				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $res[$position]);
 				$tgItemToKeep   = $this->compare($tgItem, $res[$position]);
-				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $tgItemToKeep); // SKIP: a method template with a bound is shown as its bound inside the method
+				assertType('T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)', $tgItemToKeep);
 				$res[$position] = $tgItemToKeep;
 			}
 		}
 		ksort($res);
 
-		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)>', $res); // SKIP: a method template with a bound is shown as its bound inside the method
+		assertType('array<T of Bug7511\PositionEntityInterface&Bug7511\TgEntityInterface (method Bug7511\HelloWorld::computeForFrontByPosition(), parameter)>', $res);
 
 		return $res;
 	}

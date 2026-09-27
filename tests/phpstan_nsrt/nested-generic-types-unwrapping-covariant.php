@@ -43,7 +43,7 @@ function unwrapGeneric(GenericPackage $package) {
  * @return TGenericPackage
  */
 function unwrapGeneric2(GenericPackage $package) {
-	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\unwrapGeneric2(), argument)> (function NestedGenericTypesUnwrappingCovariant\unwrapGeneric2(), argument)', $package); // SKIP: a method template with a bound is shown as its bound inside the method
+	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\unwrapGeneric2(), argument)> (function NestedGenericTypesUnwrappingCovariant\unwrapGeneric2(), argument)', $package);
 
 	return $package;
 }
@@ -71,7 +71,7 @@ function loadWithDirectUnwrap(string $class) {
 function loadWithIndirectUnwrap(string $class) {
 	$package = new $class();
 	$result = unwrapGeneric($package);
-	assertType('TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap(), argument)', $result); // SKIP: a method template with a bound is shown as its bound inside the method
+	assertType('TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap(), argument)', $result);
 
 	return $result;
 }
@@ -84,9 +84,9 @@ function loadWithIndirectUnwrap(string $class) {
  */
 function loadWithIndirectUnwrap2(string $class) {
 	$package = new $class();
-	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)> (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)', $package); // SKIP: a method template with a bound is shown as its bound inside the method
+	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)> (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)', $package);
 	$result = unwrapGeneric2($package);
-	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)> (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)', $result); // SKIP: a method template with a bound is shown as its bound inside the method
+	assertType('TGenericPackage of NestedGenericTypesUnwrappingCovariant\GenericPackage<TInnerPackage of NestedGenericTypesUnwrappingCovariant\InnerPackage (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)> (function NestedGenericTypesUnwrappingCovariant\loadWithIndirectUnwrap2(), argument)', $result);
 
 	return $result;
 }

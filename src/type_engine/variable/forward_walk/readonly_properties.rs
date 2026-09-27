@@ -134,6 +134,7 @@ fn constructor_narrowed_properties(
         enclosing_return_type: None,
         top_level_scope: None,
         in_loop: false,
+        template_markers: None,
     };
     let mut ctor_scope = ScopeState::new();
     seed_this(&mut ctor_scope, &walk_ctx);

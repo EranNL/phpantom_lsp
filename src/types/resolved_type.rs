@@ -229,6 +229,18 @@ impl ResolvedType {
                 _ => type_hint,
             };
             vec![ResolvedType::from_both_arc(type_hint, class)]
+        } else if let Some((name, bound)) = type_hint.as_template_param()
+            && !matches!(bound.kind(), TypeKind::Intersection(_))
+        {
+            // A template bounded by a union is one of the alternatives, so
+            // each entry is that template bounded by its own alternative:
+            // narrowing can still drop entries one class at a time, and the
+            // join reads the survivors back as the template.
+            let mut results = Self::from_classes_with_hint(classes, bound.clone());
+            for rt in &mut results {
+                rt.type_string = PhpType::template_param(name, rt.type_string.clone());
+            }
+            results
         } else if matches!(&type_hint.kind(), TypeKind::Intersection(_)) {
             // Intersection types: all classes contribute members to a
             // single value.  Emit one ResolvedType per class (so
@@ -703,9 +715,42 @@ impl ResolvedType {
                 {
                     members.retain(|m| !m.is_empty_array_shape());
                 }
+                merge_template_alternatives(&mut members);
                 PhpType::union(members)
             }
         }
+    }
+}
+
+/// Fold the members that are the same template, each bounded by one
+/// alternative (what [`ResolvedType::from_classes_with_hint`] splits a
+/// union-bounded template into), back into that template bounded by
+/// their union, in the place the first of them held.
+fn merge_template_alternatives(members: &mut Vec<PhpType>) {
+    let mut i = 0;
+    while i < members.len() {
+        let Some((name, _)) = members[i].as_template_param() else {
+            i += 1;
+            continue;
+        };
+        let same = |m: &PhpType| m.as_template_param().is_some_and(|(n, _)| n == name);
+        if members[i + 1..].iter().any(same) {
+            let bounds: Vec<PhpType> = members[i..]
+                .iter()
+                .filter_map(|m| m.as_template_param().filter(|(n, _)| *n == name))
+                .map(|(_, bound)| bound.clone())
+                .collect();
+            members[i] = PhpType::template_param(name, PhpType::union(bounds));
+            let mut j = i + 1;
+            while j < members.len() {
+                if same(&members[j]) {
+                    members.remove(j);
+                } else {
+                    j += 1;
+                }
+            }
+        }
+        i += 1;
     }
 }
 

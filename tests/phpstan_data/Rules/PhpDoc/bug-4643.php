@@ -35,7 +35,7 @@ class Repository
 	 */
 	function store(Entity $entity): Entity
 	{
-		assertType('F of E of Bug4643\Entity (class Bug4643\Repository, argument) (method Bug4643\Repository::store(), argument)', $entity); // SKIP: a method template with a bound is shown as its bound inside the method
+		assertType('F of E of Bug4643\Entity (class Bug4643\Repository, argument) (method Bug4643\Repository::store(), argument)', $entity);
 		return $entity;
 	}
 

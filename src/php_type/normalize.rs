@@ -33,6 +33,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.simplified());
         }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.simplified());
+        }
         match self.kind() {
             TypeKind::Union(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
@@ -140,6 +143,9 @@ impl PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.widen_scalar_literals());
         }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.widen_scalar_literals());
+        }
         match self.kind() {
             TypeKind::Literal(value) => match &**value {
                 LiteralValue::Int(_) => PhpType::int(),
@@ -183,6 +189,9 @@ impl PhpType {
     pub(crate) fn widen_boolean_literals(&self) -> PhpType {
         if let TypeKind::Benevolent(inner) = self.raw_kind() {
             return PhpType::benevolent(inner.widen_boolean_literals());
+        }
+        if let Some((name, bound)) = self.as_template_param() {
+            return PhpType::template_param(name, bound.widen_boolean_literals());
         }
         match self.kind() {
             TypeKind::Named(name)

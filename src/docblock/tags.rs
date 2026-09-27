@@ -1960,6 +1960,15 @@ pub fn resolve_effective_type_typed(
         // A declared `never` stands whatever the native hint says: the
         // function does not return, so what it would have returned is moot.
         (Some(_), Some(doc)) if doc.is_never() => Some(doc.clone()),
+        // A template bounded by exactly the native type is that type, with
+        // the name of the template the value still is.
+        (Some(native), Some(doc))
+            if doc
+                .as_template_param()
+                .is_some_and(|(_, bound)| bound.equivalent(native)) =>
+        {
+            Some(doc.clone())
+        }
         // Both present → override only if compatible.
         (Some(native), Some(doc)) => {
             let Some(doc) = doc_members_native_can_hold(doc, native) else {

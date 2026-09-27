@@ -10,7 +10,7 @@ use function PHPStan\Testing\assertType;
  * @return array<K, string>
  */
 function stringValues(array $in): array {
-	$a = assertType('array<K of (int|string) (function Bug3769\stringValues(), argument), int>', $in); // SKIP: a method template with a bound is shown as its bound inside the method
+	$a = assertType('array<K of (int|string) (function Bug3769\stringValues(), argument), int>', $in);
 	return array_map(function (int $int): string {
 		return (string) $int;
 	}, $in);
@@ -37,7 +37,7 @@ function foo(
  * @param T $foo
  */
 function fooUnion($foo): void {
-	$a = assertType('T of Exception|stdClass (function Bug3769\fooUnion(), argument)', $foo); // SKIP: a method template with a bound is shown as its bound inside the method
+	$a = assertType('T of Exception|stdClass (function Bug3769\fooUnion(), argument)', $foo);
 	echo 'test';
 }
 

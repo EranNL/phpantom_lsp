@@ -82,11 +82,25 @@ impl PhpType {
     /// The two markers never wrap each other — one only ever tags a union or
     /// nullable, the other only ever tags an array shape — so one hop is
     /// always enough to reach the node itself.
+    ///
+    /// A [`TemplateParam`](TypeKind::TemplateParam) is seen through to its
+    /// bound the same way, which may take one more hop.
     #[inline]
     pub fn kind(&self) -> &TypeKind {
         match &*self.0 {
             TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => &inner.0,
+            TypeKind::TemplateParam(_, bound) => bound.kind(),
             kind => kind,
+        }
+    }
+
+    /// The template parameter this type is, and the bound it stands for,
+    /// when it is a [`TemplateParam`](TypeKind::TemplateParam).
+    #[inline]
+    pub fn as_template_param(&self) -> Option<(Atom, &PhpType)> {
+        match &*self.0 {
+            TypeKind::TemplateParam(name, bound) => Some((*name, bound)),
+            _ => None,
         }
     }
 
@@ -328,6 +342,23 @@ pub enum TypeKind {
     ///
     /// [`ArrayShape`]: TypeKind::ArrayShape
     ListShape(PhpType),
+
+    /// A function or method `@template T of Bound` parameter, seen from
+    /// inside the declaration that introduces it: the value is still `T`,
+    /// but all that is known about it is that it is a `Bound`.
+    ///
+    /// Invisible to [`PhpType::kind`] the same way
+    /// [`Benevolent`](TypeKind::Benevolent) is: every `match ty.kind()`
+    /// sees the bound, so class lookup, member access, subtyping and
+    /// narrowing all treat the value as its bound, and the bound travels
+    /// with the value into anything derived from it (`array<T>`'s element,
+    /// a foreach variable) however late that is looked at.  Only the
+    /// display (which spells the template's name) and template
+    /// substitution (which replaces it by name, like a `Named`) look at
+    /// the marker itself.  A transform that rebuilds the type through
+    /// `kind()` drops the name and keeps the bound, which is what it was
+    /// before the marker existed.
+    TemplateParam(Atom, PhpType),
 }
 
 /// Payload of [`TypeKind::Generic`].
@@ -770,6 +801,19 @@ impl PhpType {
     /// to be at least `bound`.
     pub fn static_type(bound: Atom) -> PhpType {
         TypeKind::StaticType(bound).into()
+    }
+
+    /// The template parameter `name`, known to be a `bound`.
+    ///
+    /// A bound that is itself a bounded template (`@template U of T`)
+    /// contributes its own bound, so the marker never wraps another one and
+    /// [`kind`](PhpType::kind) stays a bounded number of hops.
+    pub fn template_param(name: Atom, bound: PhpType) -> PhpType {
+        let bound = match bound.as_template_param() {
+            Some((_, inner)) => inner.clone(),
+            None => bound,
+        };
+        TypeKind::TemplateParam(name, bound).into()
     }
 
     /// `$this` resolved against a class context.
@@ -1883,9 +1927,9 @@ impl PhpType {
     /// avoiding a parse round-trip.
     pub fn to_native_hint_typed(&self) -> Option<PhpType> {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.to_native_hint_typed()
-            }
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::TemplateParam(_, inner) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -3134,7 +3178,7 @@ impl PhpType {
             TypeKind::Conditional(..) => true,
             TypeKind::IntRange(..) => true,
             TypeKind::Literal(..) => true,
-            TypeKind::StaticType(_) | TypeKind::ThisType(_) => true,
+            TypeKind::StaticType(_) | TypeKind::ThisType(_) | TypeKind::TemplateParam(..) => true,
             TypeKind::Raw(s) => s.contains('<') || s.contains('{') || s.ends_with("[]"),
         }
     }
@@ -3176,6 +3220,10 @@ impl PhpType {
                 inner.references_any_template_param(template_params)
             }
             TypeKind::Named(name) => template_params.iter().any(|p| p == name),
+            TypeKind::TemplateParam(name, bound) => {
+                template_params.iter().any(|p| p == name)
+                    || bound.references_any_template_param(template_params)
+            }
             TypeKind::Nullable(inner) => inner.references_any_template_param(template_params),
             TypeKind::Union(members) | TypeKind::Intersection(members) => members
                 .iter()

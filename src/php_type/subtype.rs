@@ -85,6 +85,14 @@ impl PhpType {
             return true;
         }
 
+        // A template seen from inside its declaration is still the template
+        // its name spells, whatever its bound says.
+        if let Some((name, _)) = self.as_template_param()
+            && matches!(supertype.raw_kind(), TypeKind::Named(n) if *n == name)
+        {
+            return true;
+        }
+
         // `never` / `no-return` is bottom — subtype of everything.
         if self.is_never() {
             return true;
