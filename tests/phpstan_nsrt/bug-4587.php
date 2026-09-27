@@ -33,6 +33,7 @@ class HelloWorld
 			return $result;
 		}, $results);
 
-		assertType('list<array{a: lowercase-string&numeric-string&uppercase-string}>', $type); // SKIP: array_map() with a closure that rewrites its parameter keeps the parameter's original shape
+		// PHPantom treats PHPStan's string refinements (lowercase-string, numeric-string, ...) as string.
+		assertType('list<array{a: string}>', $type);
 	}
 }

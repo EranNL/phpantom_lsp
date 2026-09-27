@@ -12,7 +12,11 @@ use crate::type_engine::variable::rhs_resolution::{
 };
 use crate::types::*;
 
-use crate::type_engine::resolver::{Loaders, ResolutionCtx};
+use crate::type_engine::resolver::{Loaders, ResolutionCtx, with_isolated_chain_cache};
+use crate::type_engine::variable::forward_walk::{
+    ForwardWalkCtx, ScopeState, suspend_diagnostic_scope, suspend_return_edges, walk_body_forward,
+};
+use mago_syntax::cst::{Expression, Statement};
 
 use super::return_types::{
     literal_arg_type, resolve_call_return_hint, resolve_cast_type, resolve_chain_declared_return,
@@ -1080,8 +1084,23 @@ impl Backend {
             })
             .collect();
 
+        let walked_locals = walk_closure_body_locals(closure_text, &param_types, ctx);
+
         let outer_resolver = ctx.scope_var_resolver;
         let param_aware_resolver = move |name: &str| -> Vec<ResolvedType> {
+            // A full closure body may reassign a parameter before
+            // returning it (`$result['a'] = (string) $result['a']; return
+            // $result;`), so the walked locals — the forward walker's own
+            // scope after running the body — answer first when they have
+            // something to say.  They fall back to the raw seed for a
+            // parameter the body never touches, and for an arrow function
+            // (nothing to walk).
+            if let Some(locals) = &walked_locals
+                && let Some(types) = locals.get(&atom(name))
+                && !types.is_empty()
+            {
+                return types.clone();
+            }
             if let Some(types) = param_types.get(name) {
                 return types.clone();
             }
@@ -1132,6 +1151,92 @@ impl Backend {
         };
         Self::resolve_arg_text_to_type(body, &param_ctx)
     }
+}
+
+/// Walk a full closure literal's own body with the shared forward walker,
+/// seeded with the parameter types the call site hands it, and return the
+/// scope those statements leave behind.
+///
+/// [`Backend::resolve_closure_body_type`] otherwise resolves only the
+/// return expression's text against the raw parameter seed, so a body that
+/// reassigns a parameter before returning it (`$result['a'] = (string)
+/// $result['a']; return $result;`) still reports the parameter's original
+/// shape. Re-parsing the closure in isolation and running its body through
+/// [`walk_body_forward`] answers with what the body actually leaves in
+/// `$result`, the same as any other consumer of the forward walker.
+///
+/// Returns `None` when `closure_text` is not a full (`function`) closure
+/// literal — an arrow function's body is a single expression with nothing
+/// to walk, so the caller's raw-seed resolver already answers correctly.
+fn walk_closure_body_locals(
+    closure_text: &str,
+    param_types: &HashMap<String, Vec<ResolvedType>>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<AtomMap<Vec<ResolvedType>>> {
+    let trimmed = closure_text.trim().trim_end_matches(';');
+    let wrapped = format!("<?php $__closure = {trimmed};");
+
+    // The closure body is parsed and walked in complete isolation from
+    // the file the call site sits in: its own offsets are unrelated to
+    // (and may numerically collide with) the real file's, so neither the
+    // diagnostic scope cache nor the chain-resolution cache may read
+    // from, or record into, the active ones while this walk runs. See
+    // `out_param::read_out_type`, which walks another file's body for the
+    // same reason.
+    let _isolated = (suspend_diagnostic_scope(), with_isolated_chain_cache());
+    let _barrier = suspend_return_edges();
+
+    crate::parser::with_parsed_program(
+        &wrapped,
+        "closure_body_return_narrowing",
+        |program, content| {
+            let closure = program.statements.iter().find_map(|stmt| {
+                let Statement::Expression(expr_stmt) = stmt else {
+                    return None;
+                };
+                let Expression::Assignment(assignment) = expr_stmt.expression else {
+                    return None;
+                };
+                let Expression::Closure(closure) = assignment.rhs else {
+                    return None;
+                };
+                Some(closure)
+            })?;
+
+            let dummy_class;
+            let current_class = match ctx.current_class {
+                Some(cc) => cc,
+                None => {
+                    dummy_class = crate::class_lookup::class_context_placeholder(content, 0);
+                    &dummy_class
+                }
+            };
+
+            let fw_ctx = ForwardWalkCtx {
+                current_class,
+                all_classes: ctx.all_classes,
+                content,
+                cursor_offset: u32::MAX,
+                class_loader: ctx.class_loader,
+                backend: ctx.backend,
+                loaders: Loaders::with_function(ctx.function_loader),
+                resolved_class_cache: ctx.resolved_class_cache,
+                enclosing_return_type: None,
+                top_level_scope: None,
+                in_loop: false,
+                template_markers: None,
+            };
+
+            let mut scope = ScopeState::new();
+            for (name, types) in param_types {
+                scope.seed(name, types.clone());
+            }
+
+            walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+
+            Some(scope.locals)
+        },
+    )
 }
 
 /// Build the full template substitution map for a method call: class-level

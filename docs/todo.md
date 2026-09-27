@@ -107,7 +107,6 @@ unlikely to move the needle for most users.
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B484 | [`array_merge()` of array literals does not produce the merged shape](todo/bugs.md#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape) | Low-Medium | Medium |
 | B496 | [A static call on an intersection-typed variable or on a property has no type](todo/bugs.md#b496-a-static-call-on-an-intersection-typed-variable-or-on-a-property-has-no-type) | Low-Medium | Medium |
-| B499 | [`array_map()` with a closure that rewrites its parameter keeps the parameter's shape](todo/bugs.md#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape) | Low-Medium | Medium |
 | B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
 | B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
 | B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |

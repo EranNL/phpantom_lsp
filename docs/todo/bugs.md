@@ -407,18 +407,3 @@ $untouched;     // should be null, has no type
 Capturing an undefined variable by reference creates it, as `null`, in both scopes.
 
 Found porting PHPStan's `nsrt/closure-passed-by-reference.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B499. `array_map()` with a closure that rewrites its parameter keeps the parameter's shape
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @var list<array{a: int}> $results */
-array_map(static function (array $result): array {
-    $result['a'] = (string) $result['a'];
-    return $result;
-}, $results); // should be list<array{a: string}>, is list<array{a: int}>
-```
-
-The closure's return type is read as its parameter's inferred type rather than from what the body returns after the write.
-
-Found porting PHPStan's `nsrt/bug-4587.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.

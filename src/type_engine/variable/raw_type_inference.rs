@@ -648,7 +648,33 @@ fn infer_callback_return_type(
         crate::php_type::TypeKind::Union(members) => members.iter().map(seed_member).collect(),
         _ => vec![seed_member(param_type)],
     };
+
+    // A full closure body may reassign the parameter before returning it
+    // (`$result['a'] = (string) $result['a']; return $result;`), so its
+    // statements are walked with the shared forward walker — seeded with
+    // the same call-site type — before the return expression is resolved.
+    // Reading the parameter straight from `resolved_param` (as an arrow
+    // function's single-expression body still does below) would answer
+    // with the type the callback receives rather than the one it hands
+    // back.
+    let walked_locals = if let Expression::Closure(closure) = callback_expr {
+        Some(walk_closure_body_scope(
+            closure,
+            param_name.as_deref(),
+            &resolved_param,
+            ctx,
+        ))
+    } else {
+        None
+    };
+
     let scope_resolver = move |var: &str| -> Vec<ResolvedType> {
+        if let Some(locals) = &walked_locals
+            && let Some(types) = locals.get(&atom(var))
+            && !types.is_empty()
+        {
+            return types.clone();
+        }
         if param_name.as_deref() == Some(var) {
             resolved_param.clone()
         } else {
@@ -674,4 +700,33 @@ fn infer_callback_return_type(
     };
 
     super::foreach_resolution::resolve_expression_type(body_expr, &infer_ctx)
+}
+
+/// Walk a closure's own body with the shared forward walker, seeded with
+/// what the call site hands its parameter, and return the scope its
+/// statements leave behind.
+///
+/// This is a transient lookup seeded from the call site rather than the
+/// closure's own declared scope, so, like
+/// [`super::forward_walk::resolve_in_method_body`], it must not write into
+/// an active diagnostic scope cache — reading from one is safe, since the
+/// offsets walked belong to this same file.
+fn walk_closure_body_scope(
+    closure: &Closure<'_>,
+    param_name: Option<&str>,
+    resolved_param: &[ResolvedType],
+    ctx: &VarResolutionCtx<'_>,
+) -> crate::atom::AtomMap<Vec<ResolvedType>> {
+    let fw_ctx =
+        super::forward_walk::ForwardWalkCtx::from_var_ctx(ctx).with_cursor_offset(u32::MAX);
+    let mut scope = super::forward_walk::ScopeState::new();
+    if let Some(name) = param_name {
+        scope.seed(name, resolved_param.to_vec());
+    }
+
+    let _suspend = super::forward_walk::suspend_snapshot_recording();
+    let _barrier = super::forward_walk::suspend_return_edges();
+    super::forward_walk::walk_body_forward(closure.body.statements.iter(), &mut scope, &fw_ctx);
+
+    scope.locals
 }
