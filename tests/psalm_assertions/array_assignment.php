@@ -830,7 +830,7 @@ namespace PsalmTest_array_assignment_58 {
 
     $a = ChildClass::A;
 
-    assertType('array{a: \'a\', b: \'b\', c: \'c\'}', $a); // SKIP: spreading a constant array in a class constant's initializer has no type
+    assertType('array{a: \'a\', b: \'b\', c: \'c\'}', $a);
 }
 
 // Test: mergeWithNestedMixed

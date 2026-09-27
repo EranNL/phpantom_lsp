@@ -110,30 +110,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B530. A constant whose initializer uses another constant has no type
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-const ONE = 1;
-const TWO = ONE * 2;           // no type, should be 2
-
-class C {
-    const ONE = 1;
-    const THREE = 3;
-    const ONE_THIRD = self::ONE / self::THREE;               // no type, should be float
-    const SENTENCE = 'The value of THREE is ' . self::THREE; // no type
-}
-
-class Child extends Base {
-    const A = [...parent::KEYS, 'c' => 'c'];                 // array, should be the shape
-}
-```
-
-`self::ONE * 2` and `self::ONE >> 2` in a class constant fold, but
-division, concatenation and a spread do not, and a global constant's
-initializer that names another constant does not fold at all.
-
-The SKIPs are in `tests/psalm_assertions/php56.php` and
-`array_assignment.php`. Found porting Psalm's `Php56Test.php` and
-`ArrayAssignmentTest.php`.
+No outstanding items.

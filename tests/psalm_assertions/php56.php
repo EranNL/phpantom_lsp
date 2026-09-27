@@ -55,8 +55,8 @@ namespace PsalmTest_php56_2 {
     assertType('1', $c1);
     assertType('2', $c2);
     assertType('3', $c3);
-    assertType('float', $c1_3rd); // SKIP: a class constant whose initializer divides or concatenates other constants has no type
-    assertType('\'The value of THREE is 3\'', $c_sentence); // SKIP: a class constant whose initializer divides or concatenates other constants has no type
+    assertType('float', $c1_3rd);
+    assertType('\'The value of THREE is 3\'', $c_sentence);
     assertType('int', $cf);
     assertType('int', $c4);
     assertType('0', $shift);
@@ -82,9 +82,9 @@ namespace PsalmTest_php56_3 {
 
     // PHPantom keeps the literal values Psalm's assertion widens to their base type.
     assertType('1', $one);
-    assertType('2', $two); // SKIP: a global constant whose initializer uses another constant has no type
-    assertType('0', $bitwise); // SKIP: a global constant whose initializer uses another constant has no type
-    assertType('4', $shift); // SKIP: a global constant whose initializer uses another constant has no type
+    assertType('2', $two);
+    assertType('0', $bitwise);
+    assertType('4', $shift);
     assertType('-2', $shift2);
 }
 

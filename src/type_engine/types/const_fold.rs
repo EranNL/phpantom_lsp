@@ -12,10 +12,11 @@
 //!
 //! Reading the initialiser as text stops at the first name. This module folds
 //! the rest: names are resolved through the shared resolver the caller hands
-//! in, and the bitwise and integer arithmetic operators PHP allows in a
-//! constant expression are applied to the integers they come back as. A term that cannot be pinned
-//! down leaves the whole expression unfolded, so a mask nobody can read stays
-//! unread rather than becoming a wrong number.
+//! in, the bitwise and integer arithmetic operators PHP allows in a constant
+//! expression are applied to the integers they come back as, and a
+//! concatenation joins the scalars its operands hold. A term that cannot be
+//! pinned down leaves the whole expression unfolded, so a mask nobody can read
+//! stays unread rather than becoming a wrong number.
 //!
 //! Names are resolved in the scope of the *reading* file, not the file the
 //! constant was declared in, because that is all the shared text resolver has
@@ -79,6 +80,8 @@ enum IntOp {
     Add,
     Sub,
     Mul,
+    Div,
+    Mod,
 }
 
 impl IntOp {
@@ -90,18 +93,22 @@ impl IntOp {
             IntOp::Bitwise(BitwiseOp::And) => 2,
             IntOp::Bitwise(BitwiseOp::LeftShift | BitwiseOp::RightShift) => 3,
             IntOp::Add | IntOp::Sub => 4,
-            IntOp::Mul => 5,
+            IntOp::Mul | IntOp::Div | IntOp::Mod => 5,
         }
     }
 
     /// The integer `lhs op rhs` produces, or `None` when PHP would produce a
-    /// float instead (an overflow) or no value at all.
+    /// float instead (an overflow, a division that does not come out even) or
+    /// no value at all (a division by zero).
     fn apply(self, lhs: i64, rhs: i64) -> Option<i64> {
         match self {
             IntOp::Bitwise(op) => apply_bitwise(op, lhs, rhs),
             IntOp::Add => lhs.checked_add(rhs),
             IntOp::Sub => lhs.checked_sub(rhs),
             IntOp::Mul => lhs.checked_mul(rhs),
+            IntOp::Div if lhs.checked_rem(rhs)? == 0 => lhs.checked_div(rhs),
+            IntOp::Div => None,
+            IntOp::Mod => lhs.checked_rem(rhs),
         }
     }
 }
@@ -109,11 +116,12 @@ impl IntOp {
 /// The integer the constant expression `text` folds to.
 ///
 /// Handles the operators PHP allows in a constant expression that produce an
-/// integer from integers: `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `*`, unary
-/// `~`/`-`/`+`, and parentheses. An arithmetic result that overflows into a
-/// float leaves the expression unfolded. Every other term is handed to `resolve` and folds only when it
-/// comes back a literal integer, which covers a global constant, a class
-/// constant, and a variable holding one.
+/// integer from integers: `|`, `^`, `&`, `<<`, `>>`, `+`, `-`, `*`, `/`, `%`,
+/// unary `~`/`-`/`+`, and parentheses. An arithmetic result that is a float
+/// (an overflow, or a division that does not come out even) leaves the
+/// expression unfolded. Every other term is handed to `resolve` and folds
+/// only when it comes back a literal integer, which covers a global constant,
+/// a class constant, and a variable holding one.
 pub(crate) fn fold_int_expression(text: &str, resolve: TextResolver<'_>) -> Option<i64> {
     let text = strip_wrapping_parens(text.trim());
     match split_point(text) {
@@ -212,6 +220,9 @@ fn split_point(text: &str) -> Option<(usize, usize, IntOp)> {
                     b'+' if after_operand => Some((1, IntOp::Add)),
                     b'-' if after_operand => Some((1, IntOp::Sub)),
                     b'*' => Some((1, IntOp::Mul)),
+                    // `//` and `/*` open a comment rather than divide.
+                    b'/' if !matches!(bytes.get(i + 1), Some(b'/' | b'*')) => Some((1, IntOp::Div)),
+                    b'%' => Some((1, IntOp::Mod)),
                     _ => None,
                 };
                 if let Some((op_len, op)) = matched {
@@ -344,18 +355,106 @@ pub(crate) fn folded_constant_type(
     resolve: TextResolver<'_>,
 ) -> Option<PhpType> {
     let _guard = FoldGuard::acquire(key)?;
-    let value = strip_wrapping_parens(value.trim());
+    fold_scalar_expression(value, resolve)
+}
 
+/// The literal type the constant expression `text` folds to, or `float`
+/// for a division of integers that does not come out even.
+fn fold_scalar_expression(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let text = strip_wrapping_parens(text.trim());
+
+    if let Some(operands) = split_top_level_concat(text) {
+        let mut operands = operands.into_iter();
+        let mut folded = fold_concat_operand(operands.next()?, resolve)?;
+        for operand in operands {
+            folded = crate::type_engine::variable::rhs_resolution::fold_concat_types(
+                &folded,
+                &fold_concat_operand(operand, resolve)?,
+            )?;
+        }
+        return Some(folded);
+    }
     // An operator expression is folded operand by operand.
-    if has_top_level_int_operator(value) || value.starts_with(['~', '-', '+']) {
-        return fold_int_expression(value, resolve)
-            .map(|folded| PhpType::literal_int(folded.to_string()));
+    if has_top_level_int_operator(text) || text.starts_with(['~', '-', '+']) {
+        return fold_int_expression(text, resolve)
+            .map(|folded| PhpType::literal_int(folded.to_string()))
+            .or_else(|| non_integral_quotient(text, resolve));
     }
     // Anything else is one term, and a constant that is an alias of another
     // one (`const NS = Base::NS;`) holds whatever that one holds, whether or
     // not it is an integer. Asking the resolver directly rather than through
     // the fold covers the non-integer values too, and asks only once.
-    resolve(value).filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+    resolve(text).filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+}
+
+/// One operand of a concatenation: a literal is read as written, anything
+/// else is folded the way a whole initialiser would be.
+fn fold_concat_operand(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    crate::type_engine::variable::rhs_resolution::infer_type_from_constant_value(text)
+        .filter(|ty| matches!(ty.kind(), TypeKind::Literal(_)))
+        .or_else(|| fold_scalar_expression(text, resolve))
+}
+
+/// `float` when `text` divides two integers that do not divide evenly, which
+/// is the one way integer operands make PHP produce a float. The value itself
+/// is not kept: its decimal spelling is rarely the one PHP would print.
+fn non_integral_quotient(text: &str, resolve: TextResolver<'_>) -> Option<PhpType> {
+    let (index, op_len, IntOp::Div) = split_point(text)? else {
+        return None;
+    };
+    fold_int_expression(&text[..index], resolve)?;
+    let divisor = fold_int_expression(&text[index + op_len..], resolve)?;
+    (divisor != 0).then(PhpType::float)
+}
+
+/// The operands of a concatenation written at the top level of `text`, or
+/// `None` when there is none.
+///
+/// `.` binds looser than the arithmetic and shift operators but tighter than
+/// the bitwise and comparison ones, so an expression with one of those at its
+/// top level is not a concatenation at heart and is left alone. A `.` that is
+/// part of a number (`1.5`, `.5`) or a spread (`...`) does not split.
+fn split_top_level_concat(text: &str) -> Option<Vec<&str>> {
+    use crate::text_scan::{ScanStep, scan_top_level};
+
+    let dots = RefCell::new(Vec::new());
+    let looser_operator = scan_top_level(text.as_bytes(), |bytes, i| match bytes[i] {
+        b'-' if bytes.get(i + 1) == Some(&b'>') => ScanStep::Skip(2),
+        b'<' | b'>' if bytes.get(i + 1) == Some(&bytes[i]) => ScanStep::Skip(2),
+        b'|' | b'&' | b'^' | b'<' | b'>' | b'=' | b'!' | b'?' => ScanStep::Stop,
+        b'.' if bytes[i..].starts_with(b"...") => ScanStep::Skip(3),
+        b'.' if is_decimal_point(bytes, i) => ScanStep::Skip(1),
+        b'.' => {
+            dots.borrow_mut().push(i);
+            ScanStep::Skip(1)
+        }
+        _ => ScanStep::Skip(1),
+    });
+    let dots = dots.into_inner();
+    if looser_operator.is_some() || dots.is_empty() {
+        return None;
+    }
+    let mut operands = Vec::with_capacity(dots.len() + 1);
+    let mut start = 0;
+    for dot in dots {
+        operands.push(text[start..dot].trim());
+        start = dot + 1;
+    }
+    operands.push(text[start..].trim());
+    (!operands.iter().any(|operand| operand.is_empty())).then_some(operands)
+}
+
+/// Whether the `.` at `i` is the decimal point of a number literal: the word
+/// before it is all digits, or there is no word before it and a digit after.
+fn is_decimal_point(bytes: &[u8], i: usize) -> bool {
+    let word_start = bytes[..i]
+        .iter()
+        .rposition(|b| !(b.is_ascii_alphanumeric() || *b == b'_'))
+        .map_or(0, |p| p + 1);
+    if word_start < i {
+        return bytes[word_start].is_ascii_digit();
+    }
+    bytes.get(i + 1).is_some_and(u8::is_ascii_digit)
 }
 
 #[cfg(test)]
@@ -448,6 +547,50 @@ mod tests {
         assert_eq!(fold("2 ** 3"), None);
         assert_eq!(fold("2 * 3 ** 2"), None);
         assert_eq!(fold("$flags - 1"), None);
+    }
+
+    #[test]
+    fn division_folds_only_when_it_comes_out_even() {
+        assert_eq!(fold("6 / 3"), Some(2));
+        assert_eq!(fold("JSON_PRETTY_PRINT / 2 + 1"), Some(65));
+        assert_eq!(fold("7 % 3"), Some(1));
+        assert_eq!(fold("1 / 3"), None);
+        assert_eq!(fold("1 / 0"), None);
+        assert_eq!(fold("1 % 0"), None);
+        assert_eq!(fold("(-9223372036854775807 - 1) / -1"), None);
+    }
+
+    fn fold_constant(value: &str) -> Option<String> {
+        folded_constant_type("Test::VALUE", value, &resolve).map(|ty| ty.to_string())
+    }
+
+    #[test]
+    fn an_uneven_division_is_a_float() {
+        assert_eq!(fold_constant("1 / 3"), Some("float".to_string()));
+        assert_eq!(
+            fold_constant("JSON_PRETTY_PRINT / 3"),
+            Some("float".to_string())
+        );
+        assert_eq!(fold_constant("1 / 0"), None);
+        assert_eq!(fold_constant("$flags / 3"), None);
+    }
+
+    #[test]
+    fn a_concatenation_folds_to_the_joined_string() {
+        assert_eq!(
+            fold_constant("'The value is ' . JSON_PRETTY_PRINT"),
+            Some("'The value is 128'".to_string())
+        );
+        assert_eq!(
+            fold_constant("Foo::NS . '\\\\' . 'User'"),
+            Some("'App\\\\Models\\\\User'".to_string())
+        );
+        // Arithmetic binds tighter than `.`.
+        assert_eq!(fold_constant("'a' . 1 + 2"), Some("'a3'".to_string()));
+        assert_eq!(fold_constant("'v' . 1.5"), Some("'v1.5'".to_string()));
+        assert_eq!(fold_constant("'a' . $flags"), None);
+        // A bitwise operator binds looser than `.`, so this is not a string.
+        assert_eq!(fold_constant("'a' . 1 | 2"), None);
     }
 
     #[test]

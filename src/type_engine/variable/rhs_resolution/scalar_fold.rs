@@ -178,6 +178,12 @@ pub(super) fn fold_concat(lhs: &Scalar, rhs: &Scalar) -> Option<PhpType> {
     Some(PhpType::literal_string_value(text))
 }
 
+/// `lhs . rhs` for two types that each pin one scalar value, or `None` when
+/// either admits more than one.
+pub(crate) fn fold_concat_types(lhs: &PhpType, rhs: &PhpType) -> Option<PhpType> {
+    fold_concat(&Scalar::from_type(lhs)?, &Scalar::from_type(rhs)?)
+}
+
 /// An interpolated string (`"$a-$b"`, a heredoc) whose every embedded
 /// expression folds to a known scalar. `resolve` is only asked about
 /// expressions [`is_cheap_scalar_operand`] accepts.

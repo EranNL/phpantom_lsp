@@ -58,6 +58,8 @@ mod magic_constants;
 mod property_access;
 mod scalar_fold;
 
+pub(crate) use scalar_fold::fold_concat_types;
+
 use arithmetic::resolve_binary_result_type;
 use array_access::resolve_rhs_array_access;
 use calls::{MethodReceiver, resolve_method_call_on_receiver, resolve_rhs_call};
@@ -1477,16 +1479,7 @@ fn resolve_rhs_expression_inner<'b>(
                 }
                 _ => {}
             }
-            if let Some(maybe_value) = ctx.lookup_constant(&name, ca.name.span().start.offset)
-                && let Some(ref value) = maybe_value
-                && let Some(ts) = infer_type_from_constant_value(value).or_else(|| {
-                    crate::type_engine::call_resolution::folded_global_constant_type(
-                        name_clean,
-                        value,
-                        &ctx.as_resolution_ctx(),
-                    )
-                })
-            {
+            if let Some(ts) = global_constant_type(&name, ca.name.span().start.offset, ctx) {
                 return vec![ResolvedType::from_type_string(ts)];
             }
             crate::hover::constants::unversioned_php_version_constant_type(name_clean)
@@ -1508,6 +1501,40 @@ fn resolve_rhs_expression_inner<'b>(
         // inference pipeline.
         _ => vec![],
     }
+}
+
+/// The type the global constant `name` holds, read from its initializer.
+///
+/// `offset` is where `name` is written, or `0` when it was not written in
+/// the file at all. A name the initializer itself uses is looked up through
+/// the same constant loader, so an unqualified `ONE` in `const TWO = ONE * 2;`
+/// finds the reading namespace's `ONE` the way the reference to `TWO` found
+/// that namespace's `TWO`. The text-only resolver the fold falls back to has
+/// no namespace to try.
+fn global_constant_type(name: &str, offset: u32, ctx: &VarResolutionCtx<'_>) -> Option<PhpType> {
+    let value = ctx.lookup_constant(name, offset)??;
+    infer_type_from_constant_value(&value).or_else(|| {
+        let rctx = ctx.as_resolution_ctx();
+        let resolve = |text: &str| {
+            let text = text.trim();
+            let is_constant_name = text
+                .bytes()
+                .next()
+                .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_' || b == b'\\')
+                && text
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\');
+            is_constant_name
+                .then(|| global_constant_type(text, 0, ctx))
+                .flatten()
+                .or_else(|| crate::Backend::resolve_arg_text_to_type(text, &rctx))
+        };
+        crate::type_engine::types::const_fold::folded_constant_type(
+            strip_fqn_prefix(name),
+            &value,
+            &resolve,
+        )
+    })
 }
 
 /// The type a magic constant holds.
@@ -1877,6 +1904,18 @@ fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option
         if item.is_empty() {
             continue;
         }
+        // A spread copies a shape's entries across, keeping string keys
+        // and renumbering integer ones onto the end.
+        if let Some(source) = item.strip_prefix("...") {
+            let source = resolve?(source.trim())?;
+            for (key, value_type) in
+                crate::type_engine::variable::raw_type_inference::spread_entries(&source)?
+            {
+                keyed |= key.is_some();
+                put_shape_entry(&mut entries, key, value_type);
+            }
+            continue;
+        }
         let (key, value) = match split_top_level_arrow(item) {
             Some((key_text, value_text)) => {
                 keyed = true;
@@ -1892,17 +1931,31 @@ fn literal_array_shape(inner: &str, resolve: Option<TextResolver<'_>>) -> Option
         };
         let value_type = infer_type_from_constant_value_inner(value, resolve)
             .or_else(|| resolve.and_then(|resolve| resolved_element_literal(value, resolve)))?;
-        entries.push(ShapeEntry {
-            key,
-            value_type,
-            optional: false,
-        });
+        put_shape_entry(&mut entries, key, value_type);
     }
     Some(if keyed {
         PhpType::array_shape(entries)
     } else {
         PhpType::list_shape(entries)
     })
+}
+
+/// Write `value_type` under `key`, or under the next position when `key` is
+/// `None`. A key written again keeps its place and takes the later value,
+/// as PHP does.
+fn put_shape_entry(entries: &mut Vec<ShapeEntry>, key: Option<String>, value_type: PhpType) {
+    if let Some(existing) = key
+        .as_ref()
+        .and_then(|key| entries.iter_mut().find(|e| e.key.as_ref() == Some(key)))
+    {
+        existing.value_type = value_type;
+        return;
+    }
+    entries.push(ShapeEntry {
+        key,
+        value_type,
+        optional: false,
+    });
 }
 
 /// The key text of a shape entry, for the literal keys PHP allows: a

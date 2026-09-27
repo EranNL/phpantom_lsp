@@ -332,7 +332,9 @@ impl LiteralBuilder {
 /// shape whose every entry is known to be there: `Some(key)` for a string
 /// key, which the spread keeps, and `None` for an integer key, which it
 /// renumbers.
-fn spread_entries(source: &PhpType) -> Option<Vec<(Option<String>, PhpType)>> {
+pub(in crate::type_engine) fn spread_entries(
+    source: &PhpType,
+) -> Option<Vec<(Option<String>, PhpType)>> {
     let crate::php_type::TypeKind::ArrayShape(entries) = source.kind() else {
         return None;
     };
