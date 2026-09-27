@@ -9703,6 +9703,37 @@ class Test {
 }
 
 #[test]
+fn hover_inline_var_cast_applies_to_array_element_assignment() {
+    let backend = create_test_backend();
+    let uri = "file:///b534_hover_array_element.php";
+    let content = r#"<?php
+class Test {
+    public function run(): void {
+        /** @var string */
+        $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;
+        echo $GLOBALS;
+    }
+}
+"#;
+
+    // Hover on `$GLOBALS` after the annotated array-element assignment —
+    // the @var override should type the element as `string`, not the
+    // RHS's own `'asd'|null`.
+    let hover = hover_at(&backend, uri, content, 5, 14).expect("expected hover on $GLOBALS");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("sql_query: string"),
+        "@var override should apply to an array-element assignment target, got: {}",
+        text
+    );
+    assert!(
+        !text.contains("'asd'"),
+        "the @var override should replace the RHS's own inferred type, got: {}",
+        text
+    );
+}
+
+#[test]
 fn hover_standalone_var_annotation_still_applies() {
     let backend = create_test_backend();
     let uri = "file:///b15_hover_standalone.php";

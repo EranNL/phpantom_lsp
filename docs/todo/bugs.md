@@ -159,18 +159,3 @@ $var = 0;
 ```
 
 Found porting Psalm's `Php70Test.php` (`nullCoalesceWithReference`).
-
-### B534. An inline `@var` above an array-element assignment is ignored
-
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-/** @var string */
-$GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;
-// 'asd'|null, should be string
-```
-
-A nameless `@var` above an assignment types its right-hand side. It is
-honoured when the target is a variable, not when it is an array element.
-
-Found porting Psalm's `TypeReconciliation/EmptyTest.php` (`issue-9341-1`).

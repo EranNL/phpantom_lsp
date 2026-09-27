@@ -140,6 +140,27 @@ pub(crate) fn try_process_inline_var_override<'b>(
                 apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
                 scope.set(&var_name, resolved);
                 return VarOverrideResult::NoVar;
+            } else if let Expression::ArrayAccess(array_access) = assignment.lhs {
+                // Same rules as the plain-variable case above, applied to
+                // an array-element target:
+                // `/** @var string */ $GLOBALS['sql_query'] = rand(0, 1) ? 'asd' : null;`
+                let rhs_span = assignment.rhs.span();
+                let cursor_in_rhs = ctx.cursor_offset >= rhs_span.start.offset
+                    && ctx.cursor_offset <= rhs_span.end.offset;
+                if cursor_in_rhs {
+                    return VarOverrideResult::None;
+                }
+
+                let native_type = resolve_rhs_native_type(assignment.rhs, scope, ctx);
+                if let Some(ref native) = native_type
+                    && !crate::docblock::should_override_type_typed(&php_type, native)
+                {
+                    return VarOverrideResult::None;
+                }
+
+                apply_preceding_var_docblocks(&trimmed[..doc_start], scope, ctx);
+                process_array_key_write(array_access, resolved, scope, ctx);
+                return VarOverrideResult::NoVar;
             }
         } else if let Expression::Variable(Variable::Direct(dv)) = expr {
             let var_name = bytes_to_str(dv.name).to_string();
