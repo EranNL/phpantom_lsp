@@ -694,6 +694,24 @@ pub(crate) fn is_array_like_wrapper(name: &str) -> bool {
     ) || crate::util::short_name(name).eq_ignore_ascii_case("arrayable")
 }
 
+/// Whether evaluating any argument in `argument_list` never completes.
+///
+/// PHP evaluates call arguments before the call itself, so a `never`
+/// argument (an expression already proven unreachable, e.g. a variable
+/// narrowed to nothing by a prior guard clause) means the call can never
+/// be reached either, regardless of what its callee is declared to
+/// return.
+pub(super) fn any_argument_is_never(
+    argument_list: &ArgumentList<'_>,
+    ctx: &VarResolutionCtx<'_>,
+) -> bool {
+    argument_list.arguments.iter().any(|arg| {
+        resolve_rhs_expression(arg.value(), ctx)
+            .iter()
+            .any(|rt| rt.type_string.is_never())
+    })
+}
+
 /// Resolve function, method, and static method calls to their return
 /// types.
 pub(super) fn resolve_rhs_call<'b>(
@@ -701,6 +719,16 @@ pub(super) fn resolve_rhs_call<'b>(
     expr: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    let argument_list = match call {
+        Call::Function(func_call) => &func_call.argument_list,
+        Call::Method(method_call) => &method_call.argument_list,
+        Call::NullSafeMethod(method_call) => &method_call.argument_list,
+        Call::StaticMethod(static_call) => &static_call.argument_list,
+    };
+    if any_argument_is_never(argument_list, ctx) {
+        return vec![ResolvedType::from_type_string(PhpType::never())];
+    }
+
     let mut resolved = match call {
         Call::Function(func_call) => resolve_rhs_function_call(func_call, expr, ctx),
         Call::Method(method_call) => resolve_rhs_method_call_inner(
@@ -1714,6 +1742,9 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     receiver: Option<MethodReceiver>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    if any_argument_is_never(argument_list, ctx) {
+        return vec![ResolvedType::from_type_string(PhpType::never())];
+    }
     resolve_member_call_on_receiver(object, method, argument_list, receiver, false, ctx)
 }
 

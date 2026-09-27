@@ -105,7 +105,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B512 | [A call whose argument is `*NEVER*` still has its declared return type](todo/bugs.md#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type) | Low | Low-Medium |
 | B514 | [`join_shapes` refuses a shape with a positional entry even when the other side anchors it](todo/bugs.md#b514-join_shapes-refuses-a-shape-with-a-positional-entry-even-when-the-other-side-anchors-it) | Low | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |

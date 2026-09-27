@@ -30,21 +30,7 @@ No outstanding items.
 
 ## Reachability
 
-### B512. A call whose argument is `*NEVER*` still has its declared return type
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$this->foo = 'x';
-if (strlen($this->foo) > 0) {
-    return;
-}
-$this->foo;         // *NEVER* (correct)
-strlen($this->foo); // should be *NEVER*, is int<0, max>
-```
-
-Evaluating the argument never completes, so neither does the call. The call resolvers read the callee's return type without looking at whether an argument could have been produced at all.
-
-Found porting PHPStan's `nsrt/bug-5129.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Narrowing
 
