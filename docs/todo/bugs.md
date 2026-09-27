@@ -37,27 +37,7 @@ No outstanding items.
 
 ## Narrowing
 
-### B539. A property null check held in a variable does not narrow the property
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$both = $this->unsealed !== null && $type->unsealed !== null;
-if ($both) {
-    [, $value] = $type->unsealed;
-    // Type|null, should be Type
-}
-```
-
-A condition assigned to a variable and tested later narrows what it
-checked when that is a variable (`$has = $pair !== null; if ($has)`), but
-not when it is a property: the property keeps its `null` inside the `if`.
-A single check fails the same way as a conjunction.
-
-Found in phpstan-src's `ConstantArrayType::isSuperTypeOf()` (three
-argument mismatches at lines 787, 842 and 843, none of which PHPStan
-reports). They are already there at HEAD, so the sample sweep of
-2026-09-26 predates them.
+No outstanding items.
 
 ## Arithmetic
 

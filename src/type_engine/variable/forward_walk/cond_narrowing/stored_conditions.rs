@@ -68,7 +68,7 @@ pub(crate) fn condition_implications<'b>(
         if local.locals.is_empty() {
             continue;
         }
-        let seeded = local.locals.clone();
+        let mut before = local.clone();
         for (part, holds) in &parts {
             if *holds {
                 apply_condition_narrowing(part, &mut local, ctx);
@@ -85,10 +85,18 @@ pub(crate) fn condition_implications<'b>(
             PhpType::false_()
         })]);
         for (key, types) in local.locals {
-            let changed = seeded.get(&key).is_some_and(|before| {
-                narrowing_changed_types(before, &types) && rules_out_something(before, &types)
-            });
-            if !changed || types.is_empty() || key == lhs {
+            if types.is_empty() || key == lhs {
+                continue;
+            }
+            // A property path the check names (`$this->cache !== null`)
+            // is only seeded once narrowing reaches it, so its type before
+            // the check is resolved here, against the un-narrowed scope.
+            seed_synthetic_key_if_needed(&key, &mut before, ctx);
+            let prior = before.get(&key);
+            let changed = !prior.is_empty()
+                && narrowing_changed_types(prior, &types)
+                && rules_out_something(prior, &types);
+            if !changed {
                 continue;
             }
             proofs.push(ImpliedNarrowing {

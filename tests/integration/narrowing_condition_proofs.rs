@@ -3510,6 +3510,56 @@ function f(object $c, ?int $limit, int $count, array|string $v): void {
     );
 }
 
+/// A stored check on a property narrows the property, whether it is one
+/// check or a conjunction across two objects.
+#[test]
+fn a_stored_condition_narrows_the_property_it_checks() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+class Unsealed {}
+interface Type {}
+class Shape implements Type {
+    /** @var array{Unsealed, Unsealed}|null */
+    private ?array $unsealed = null;
+    public function f(Type $type): void {
+        if (!$type instanceof self) { return; }
+        $both = $this->unsealed !== null && $type->unsealed !== null;
+        $one = $this->unsealed !== null;
+        if ($both) {
+            [, $mine] = $this->unsealed;
+            [, $theirs] = $type->unsealed;
+        }
+        if ($one) {
+            [$single] = $this->unsealed;
+        }
+        $this->unsealed = null;
+        if ($one) {
+            $rewritten = $this->unsealed;
+        }
+    }
+}
+"#;
+    let uri = "file:///stored_property_condition.php";
+    let lines: Vec<&str> = content.lines().collect();
+    let hover_line = |line: usize| {
+        let column = lines[line].find('$').unwrap() as u32 + 1;
+        hover_text(&hover_at(&backend, uri, content, line as u32, column).expect("expected hover"))
+            .to_string()
+    };
+    for (line, name) in [(11, "$mine"), (12, "$theirs"), (15, "$single")] {
+        let hover = hover_line(line);
+        assert!(
+            hover.contains("Unsealed") && !hover.contains("null"),
+            "expected {name} to be Unsealed, got: {hover}"
+        );
+    }
+    let rewritten = hover_line(19);
+    assert!(
+        !rewritten.contains("Unsealed"),
+        "writing the property drops the stored proof, got: {rewritten}"
+    );
+}
+
 // ─── `is_a()` ──────────────────────────────────────────────────────────────
 
 /// A class held in a `class-string<Foo>` variable narrows as the literal
