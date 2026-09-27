@@ -431,6 +431,7 @@ fn apply_array_write<'b>(
     // A read of the same offset is still taken to return what was written,
     // the same assumption an `===` check on that read narrows under.
     if base_type.is_object_like() && !base_type.is_array_like() {
+        forget_overwritten_offsets(base_name, key_chain, append, scope);
         if !append {
             overwrite_written_offset(base_name, key_chain, rhs_types, scope);
         }
@@ -495,8 +496,40 @@ fn apply_array_write<'b>(
     scope.set(base_name, vec![ResolvedType::from_type_string(merged)]);
     note_element_write(base_name, &subjects, &write_keys, append, scope);
 
+    forget_overwritten_offsets(base_name, key_chain, append, scope);
     if !append {
         overwrite_written_offset(base_name, key_chain, rhs_types, scope);
+    }
+}
+
+/// Drop the synthetic offset keys a write made stale.
+///
+/// A write below an offset changes what that offset holds, so a key
+/// recorded for it (`$a["d"]`, by an earlier `$a["d"] = [...]`) would be
+/// read back instead of the updated slot in `$a`'s own type. An append
+/// changes the offset it appends to the same way. And a write that
+/// replaces an offset outright takes every key recorded below it
+/// (`$a["d"]["e"]`) with the old value.
+fn forget_overwritten_offsets(
+    base_name: &str,
+    key_chain: &[&Expression<'_>],
+    append: bool,
+    scope: &mut ScopeState,
+) {
+    let changed = if append {
+        key_chain.len()
+    } else {
+        key_chain.len().saturating_sub(1)
+    };
+    for depth in 1..=changed {
+        if let Some(prefix) = array_write_synthetic_key(base_name, &key_chain[..depth])
+            && scope.contains(&prefix)
+        {
+            scope.remove(&prefix);
+        }
+    }
+    if !append && let Some(written) = array_write_synthetic_key(base_name, key_chain) {
+        scope.invalidate_dependent_keys(&written);
     }
 }
 

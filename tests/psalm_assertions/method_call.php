@@ -100,4 +100,3 @@ namespace PsalmTest_method_call_6 {
 
     assertType('BlahModel', $n);
 }
-

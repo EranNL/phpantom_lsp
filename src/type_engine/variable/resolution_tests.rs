@@ -942,16 +942,55 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_leading_zero_map"),
-        "array{08: 'x'}"
+        "array{'08': 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_plus_map"),
-        "array{+8: 'x'}"
+        "array{'+8': 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_float_map"),
         "array{'1.5': 'x'}"
     );
+}
+
+#[test]
+fn an_offset_read_sees_writes_below_it() {
+    let content = r#"<?php
+function test() {
+    $nested = ['b' => 'c'];
+    $nested['d'] = ['e' => 'f'];
+    $nested['d']['e'] = 5;
+    $nested_read = $nested['d'];
+
+    $appended = [];
+    $appended['d'] = ['x'];
+    $appended['d'][] = 'y';
+    $appended_read = $appended['d'];
+
+    $replaced = [];
+    $replaced['d']['e'] = 1;
+    $replaced['d'] = ['e' => 2];
+    $replaced_read = $replaced['d']['e'];
+
+    $sibling = ['d' => ['e' => 1, 'f' => 2]];
+    $sibling['d']['e'] = 3;
+    $sibling_read = $sibling['d']['f'];
+
+    echo $nested_read, $appended_read, $replaced_read, $sibling_read;
+}
+"#;
+
+    assert_eq!(
+        resolve_literal_test_var(content, "$nested_read"),
+        "array{e: 5}"
+    );
+    assert_eq!(
+        resolve_literal_test_var(content, "$appended_read"),
+        "array{'x', 'y'}"
+    );
+    assert_eq!(resolve_literal_test_var(content, "$replaced_read"), "2");
+    assert_eq!(resolve_literal_test_var(content, "$sibling_read"), "2");
 }
 
 #[test]

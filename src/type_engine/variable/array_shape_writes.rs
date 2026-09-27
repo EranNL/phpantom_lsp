@@ -397,7 +397,7 @@ fn next_append_index(entries: &[ShapeEntry]) -> Option<i64> {
     for entry in entries {
         let index = match entry.key.as_deref() {
             None => Some(next),
-            Some(key) => key.parse::<i64>().ok(),
+            Some(key) => crate::php_type::canonical_int_key(key),
         };
         let Some(index) = index else { continue };
         if entry.optional {

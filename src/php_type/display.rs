@@ -193,8 +193,8 @@ fn format_shape_key(key: &str) -> String {
     if is_simple {
         return key.to_string();
     }
-    // Pure integer keys: emit bare.
-    if key.parse::<i64>().is_ok() {
+    // Integer keys: emit bare. `'+15'` and `'015'` are string keys.
+    if super::is_canonical_int_key(key) {
         return key.to_string();
     }
 

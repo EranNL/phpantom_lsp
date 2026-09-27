@@ -744,6 +744,16 @@ pub(crate) fn is_canonical_int_key(key: &str) -> bool {
         && key.parse::<i64>().is_ok()
 }
 
+/// The integer a shape key names, when [`is_canonical_int_key`] says PHP
+/// stores it as one.
+pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
+    if is_canonical_int_key(key) {
+        key.parse().ok()
+    } else {
+        None
+    }
+}
+
 /// Evaluate `value-of<T>` when `T` is a concrete array or shape type.
 ///
 /// - `value-of<array{a: int, b: string}>` → `int|string`

@@ -151,3 +151,68 @@ namespace PsalmTest_binary_operation_17 {
     assertType('float|int', $b);
 }
 
+// Test: intArithmeticAssignmentAdditionFromFunction
+namespace PsalmTest_binary_operation_18 {
+    function intFunc(): int {
+        return 5;
+    }
+    $a = 1;
+    $a += intFunc();
+
+    assertType('int', $a);
+}
+
+// Test: intArithmeticAssignmentAddition
+namespace PsalmTest_binary_operation_19 {
+    $a = 1;
+    $a += 5;
+
+    assertType('6', $a);
+}
+
+// Test: intArithmeticAssignmentSubtractionFromFunction
+namespace PsalmTest_binary_operation_20 {
+    function intFunc(): int {
+        return 5;
+    }
+    $a = 8;
+    $a -= intFunc();
+
+    assertType('int', $a);
+}
+
+// Test: intArithmeticAssignmentSubtraction
+namespace PsalmTest_binary_operation_21 {
+    $a = 8;
+    $a -= 5;
+
+    assertType('3', $a);
+}
+
+// Test: encapsedStringIsInferredAsLiteral
+namespace PsalmTest_binary_operation_27 {
+    $int = 1;
+    $float = 2.3;
+    $string = "foobar";
+    $interpolated = "{$int}{$float}{$string}";
+
+    assertType('\'12.3foobar\'', $interpolated);
+}
+
+// Test: concatenatedStringIsInferredAsLiteral
+namespace PsalmTest_binary_operation_28 {
+    $int = 1;
+    $float = 2.3;
+    $string = "foobar";
+    $concatenated = $int . $float . $string;
+
+    assertType('\'12.3foobar\'', $concatenated);
+}
+
+// Test: calculateLiteralResultForFloats
+namespace PsalmTest_binary_operation_29 {
+    $foo = 1.0 + 2.0;
+
+    // Psalm spells the float literal `float(3)`.
+    assertType('3.0', $foo);
+}

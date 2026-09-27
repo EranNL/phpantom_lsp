@@ -676,7 +676,7 @@ pub(crate) fn runtime_shape_keys(entries: &[ShapeEntry]) -> Option<Vec<String>> 
                 shifted |= entry.optional;
             }
             Some(key) => {
-                if let Ok(index) = key.parse::<i64>() {
+                if let Some(index) = canonical_int_key(key) {
                     next = next.max(index.checked_add(1)?);
                     shifted |= entry.optional;
                 }
@@ -2527,7 +2527,7 @@ impl PhpType {
                     entry
                         .key
                         .as_deref()
-                        .is_some_and(|k| k.parse::<i64>().is_err())
+                        .is_some_and(|k| !is_canonical_int_key(k))
                 })
         }
         let a_is_list = is_value_list(a);

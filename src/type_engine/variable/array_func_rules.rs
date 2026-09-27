@@ -17,7 +17,9 @@
 /// the handful of questions the rules ask about an argument, and the
 /// rules stay in one place so a fix to `array_map`'s element type
 /// reaches every consumer.
-use crate::php_type::{LiteralValue, PhpType, ShapeEntry, TypeKind, is_array_like_name};
+use crate::php_type::{
+    LiteralValue, PhpType, ShapeEntry, TypeKind, canonical_int_key, is_array_like_name,
+};
 
 use super::{ARRAY_ELEMENT_FUNCS, ARRAY_PRESERVING_FUNCS};
 
@@ -619,7 +621,7 @@ fn merge_shapes(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
         };
         for entry in explicit_key_shape_entries(&array)? {
             let key = entry.key.as_deref().unwrap_or_default();
-            if int_key(key).is_some() {
+            if canonical_int_key(key).is_some() {
                 if entry.optional {
                     return None;
                 }
@@ -649,12 +651,6 @@ fn merge_shapes(args: &dyn ArrayFuncArgs) -> Option<PhpType> {
     Some(shape_with_implicit_keys(merged))
 }
 
-/// The integer a shape key stands for, when PHP would store it as one:
-/// `"3"` and `"-1"` are integer keys, `"03"` and `"a"` are not.
-fn int_key(key: &str) -> Option<i64> {
-    key.parse::<i64>().ok().filter(|n| n.to_string() == key)
-}
-
 /// A single array shape's entries with every key spelled out, the
 /// positional ones numbered the way PHP numbers them (one past the
 /// largest integer key so far).
@@ -672,7 +668,7 @@ fn explicit_key_shape_entries(ty: &PhpType) -> Option<Vec<ShapeEntry>> {
             .map(|entry| {
                 let key = match &entry.key {
                     Some(key) => {
-                        if let Some(n) = int_key(key) {
+                        if let Some(n) = canonical_int_key(key) {
                             next_index = next_index.max(n + 1);
                         }
                         key.clone()
@@ -716,7 +712,7 @@ fn shape_key_alternatives(ty: &PhpType) -> Option<Vec<Vec<(PhpType, bool)>>> {
                     if key.contains("::") {
                         return None;
                     }
-                    let literal = match int_key(&key) {
+                    let literal = match canonical_int_key(&key) {
                         Some(_) => PhpType::literal_int(key),
                         None => PhpType::literal_string_value(key),
                     };
@@ -811,7 +807,7 @@ fn shape_end_key_type(raw: &PhpType, first: bool) -> Option<PhpType> {
 /// required `0, 1, 2, …` a positional shape stands for.
 fn shape_with_implicit_keys(mut entries: Vec<ShapeEntry>) -> PhpType {
     let sequential = entries.iter().enumerate().all(|(i, entry)| {
-        !entry.optional && entry.key.as_deref().and_then(int_key) == Some(i as i64)
+        !entry.optional && entry.key.as_deref().and_then(canonical_int_key) == Some(i as i64)
     });
     if sequential {
         for entry in &mut entries {

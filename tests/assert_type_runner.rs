@@ -598,7 +598,9 @@ fn normalize_type(ty: &str) -> String {
         }
     }
 
-    let result = expand_array_key(&expand_nested_nullable(&result))
+    let result = expand_array_key(&expand_nested_nullable(&list_shapes_as_array(&result)))
+        .replace("array<never, never>", "array{}")
+        .replace("list<never>", "array{}")
         .replace("non-negative-int", "int<0, max>")
         .replace("non-positive-int", "int<min, 0>")
         .replace("positive-int", "int<1, max>")
@@ -612,6 +614,62 @@ fn normalize_type(ty: &str) -> String {
             &result,
         ))),
     ))
+}
+
+/// Spell a sealed list shape with no optional entries, Psalm's
+/// `list{int,string}`, as the `array{int,string}` it is equal to. A list
+/// shape with an optional entry or a `...` tail has no `array{…}` twin and
+/// is left alone.
+///
+/// Expects the output of the whitespace pass in [`normalize_type`].
+fn list_shapes_as_array(ty: &str) -> String {
+    const OPEN: &str = "list{";
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(at) = rest.find(OPEN) {
+        let prefixed = rest[..at]
+            .chars()
+            .last()
+            .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\'));
+        let body_start = at + OPEN.len();
+        let mut depth = 0i32;
+        let mut quote: Option<char> = None;
+        let mut body_end = None;
+        for (i, ch) in rest[body_start..].char_indices() {
+            if let Some(q) = quote {
+                if ch == q {
+                    quote = None;
+                }
+                continue;
+            }
+            match ch {
+                '\'' | '"' => quote = Some(ch),
+                '{' | '<' | '(' | '[' => depth += 1,
+                '}' if depth == 0 => {
+                    body_end = Some(body_start + i);
+                    break;
+                }
+                '}' | '>' | ')' | ']' => depth -= 1,
+                _ => {}
+            }
+        }
+        let Some(body_end) = body_end else {
+            break;
+        };
+        let body = &rest[body_start..body_end];
+        let sealed_and_required = !body.contains("?:") && !body.contains("...");
+        out.push_str(&rest[..at]);
+        out.push_str(if !prefixed && sealed_and_required && !body.is_empty() {
+            "array{"
+        } else {
+            OPEN
+        });
+        out.push_str(&list_shapes_as_array(body));
+        out.push('}');
+        rest = &rest[body_end + 1..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Spell `array-key` as the `int|string` union it stands for, which is how
@@ -1332,6 +1390,15 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
     // Create backend and open the file.
     let backend = create_assert_type_backend();
     let uri = fixture_uri(path);
+    // Register the transformed source as the open document, the way
+    // `didOpen` does. Anything that re-reads the file (the body of a
+    // by-reference callee, say) would otherwise get the fixture from disk,
+    // whose offsets stop matching the parsed ones after the first rewritten
+    // `assertType()` call.
+    backend
+        .open_files()
+        .write()
+        .insert(uri.clone(), std::sync::Arc::new(transformed.clone()));
     backend.update_ast(&uri, &transformed);
 
     let mut failures: Vec<String> = Vec::new();
@@ -1431,7 +1498,6 @@ fn run_assert_type(path: &Path, content: String) -> datatest_stable::Result<()> 
 }
 
 datatest_stable::harness! {
-    { test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
-    { test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
-    { test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },
-}
+{ test = run_assert_type, root = "tests/phpstan_nsrt", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/psalm_assertions", pattern = r"\.php$" },
+{ test = run_assert_type, root = "tests/phpstan_data", pattern = r"\.php$" },}

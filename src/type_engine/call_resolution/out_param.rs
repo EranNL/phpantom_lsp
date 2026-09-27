@@ -90,7 +90,12 @@ impl OutParamCallee {
     /// function.
     fn key(&self, param_index: usize) -> OutTypeKey {
         match self {
-            Self::Function(fi) => (Atom::default(), fi.name, param_index as u16),
+            // Two namespaces can each declare a function of the same name.
+            Self::Function(fi) => (
+                fi.namespace.as_deref().map(atom).unwrap_or_default(),
+                fi.name,
+                param_index as u16,
+            ),
             Self::Method(cls, name) => (atom(cls.fqn().as_ref()), *name, param_index as u16),
         }
     }

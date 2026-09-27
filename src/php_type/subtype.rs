@@ -287,7 +287,7 @@ impl PhpType {
                             // Determine the key's type: named string keys are
                             // literal-string, positional keys are int.
                             let entry_key_type = match &e.key {
-                                Some(k) if k.parse::<i64>().is_ok() => PhpType::int(),
+                                Some(k) if super::is_canonical_int_key(k) => PhpType::int(),
                                 Some(_) => PhpType::string(),
                                 None => PhpType::int(),
                             };
@@ -520,7 +520,7 @@ fn shape_keys_are_sequential(entries: &[ShapeEntry]) -> bool {
         seen_optional |= entry.optional;
         match entry.key.as_deref() {
             None => {}
-            Some(key) if key.parse::<i64>() == Ok(position) => {}
+            Some(key) if super::canonical_int_key(key) == Some(position) => {}
             Some(_) => return false,
         }
     }
