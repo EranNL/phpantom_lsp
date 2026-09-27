@@ -267,6 +267,12 @@ class CountWithOptionalKeys
 		} else {
 			assertType('array{mixed}', $row);
 		}
+		// The branches above re-fold into the original shape rather than
+		// staying two alternatives: the positional `array{mixed}` an
+		// unmatched count leaves behind and the keyed `array{0: mixed,
+		// 1?: string|null}` a matched count narrows agree on the value at
+		// position 0, so the explicit key anchors the join.
+		assertType('array{0: mixed, 1?: string|null}', $row);
 
 		if (count($row) === 3) {
 			assertType('*NEVER*', $row);
@@ -303,6 +309,38 @@ class CountWithOptionalKeys
 		} else {
 			assertType('array{0: int, 1?: string|null}|array{string}', $row);
 		}
+	}
+
+	/**
+	 * A positional shape one branch produces can join with a keyed shape
+	 * another branch produces when the two agree on the value at every
+	 * position they share: the explicit key is then just a longer
+	 * spelling of the same position, not a different tag.
+	 */
+	protected function testPositionalShapeJoinsKeyedShapeWhenValuesAgree(bool $flag): void
+	{
+		if ($flag) {
+			$row = ['a'];
+		} else {
+			$row = [0 => 'a', 1 => 'b'];
+		}
+		assertType("array{'a', 1?: 'b'}", $row);
+	}
+
+	/**
+	 * A positional shape must not join with a keyed shape when the two
+	 * disagree on the value at a shared position: that is not one shape
+	 * narrowed two ways, it is two differently-tagged alternatives that
+	 * merely happen to share a length.
+	 */
+	protected function testPositionalShapeDoesNotJoinKeyedShapeWhenValuesDisagree(bool $flag): void
+	{
+		if ($flag) {
+			$row = ['a'];
+		} else {
+			$row = [0 => 1, 1 => 'b'];
+		}
+		assertType("array{'a'}|array{0: 1, 1: 'b'}", $row);
 	}
 
 	/**

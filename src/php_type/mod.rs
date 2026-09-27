@@ -2506,9 +2506,18 @@ impl PhpType {
     /// positional entry an append added beside named keys lines up with
     /// the index it sits at. Keys from `a` keep their order; keys only in
     /// `b` follow in `b`'s order. Returns `None` when either side's keys
-    /// are not decidable, and when either side is a bare list of values:
+    /// are not decidable, and when both sides are a bare list of values:
     /// two literals written slot by slot describe unrelated arrays, and
     /// pairing their slots up would invent a row neither one holds.
+    ///
+    /// When only one side is a bare list, the other side's explicit key at
+    /// each shared position is the anchor that makes pairing safe, *if* the
+    /// two sides agree on the value that position holds. A position they
+    /// disagree on (`array{string}` against `array{0: int}`) is not a
+    /// narrower and a wider spelling of the same shape, it is two
+    /// differently-tagged alternatives that merely happen to share a
+    /// length, so the whole pairing is refused rather than inventing an
+    /// `int|string` at a slot neither alternative holds both of.
     ///
     /// [`join_shapes`]: Self::join_shapes
     fn join_shape_entries(a: &[ShapeEntry], b: &[ShapeEntry]) -> Option<Vec<ShapeEntry>> {
@@ -2521,8 +2530,36 @@ impl PhpType {
                         .is_some_and(|k| k.parse::<i64>().is_err())
                 })
         }
-        if is_value_list(a) || is_value_list(b) {
+        let a_is_list = is_value_list(a);
+        let b_is_list = is_value_list(b);
+        if a_is_list && b_is_list {
             return None;
+        }
+        if a_is_list || b_is_list {
+            let (list_side, keyed_side) = if a_is_list { (a, b) } else { (b, a) };
+            let list_keys = runtime_shape_keys(list_side)?;
+            let keyed_keys = runtime_shape_keys(keyed_side)?;
+            // At least one position has to actually land on an explicit key
+            // in `keyed_side`, or there is no anchor at all: an empty shape
+            // (`array{}`) shares no key with anything, so it must not be
+            // free to absorb an unrelated positional shape just because
+            // nothing contradicts it.
+            let mut overlapped = false;
+            let anchored = list_side.iter().zip(&list_keys).all(|(entry, key)| {
+                match keyed_keys.iter().position(|other| other == key) {
+                    Some(index) => {
+                        overlapped = true;
+                        let other_value = &keyed_side[index].value_type;
+                        entry.value_type.is_mixed()
+                            || other_value.is_mixed()
+                            || entry.value_type.equivalent(other_value)
+                    }
+                    None => true,
+                }
+            });
+            if !overlapped || !anchored {
+                return None;
+            }
         }
         let keys_a = runtime_shape_keys(a)?;
         let keys_b = runtime_shape_keys(b)?;

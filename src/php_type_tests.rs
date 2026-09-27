@@ -930,6 +930,44 @@ fn join_shapes_pairs_an_appended_slot_by_index() {
 }
 
 #[test]
+fn join_shapes_positional_entry_anchors_to_an_agreeing_explicit_key() {
+    // A positional shape's slot 0 is exactly the same runtime slot an
+    // explicit `0:` key names, so when the two sides agree on the value
+    // there, the explicit key is just a longer spelling of the same
+    // position and pairing them is safe.
+    let positional = PhpType::parse("array{'a'}");
+    let keyed = PhpType::parse("array{0: 'a', 1: 'b'}");
+    assert_eq!(
+        positional.join_shapes(&keyed),
+        Some(PhpType::parse("array{'a', 1?: 'b'}"))
+    );
+    assert_eq!(
+        keyed.join_shapes(&positional),
+        Some(PhpType::parse("array{0: 'a', 1?: 'b'}"))
+    );
+
+    // `mixed` on either side is a wildcard: it never contradicts whatever
+    // the other side holds there.
+    assert_eq!(
+        PhpType::parse("array{mixed}").join_shapes(&PhpType::parse("array{0: mixed, 1?: int}")),
+        Some(PhpType::parse("array{mixed, 1?: int}"))
+    );
+
+    // A value the two sides disagree on means these are two
+    // differently-tagged alternatives that merely share a length, not one
+    // shape spelled two ways, so the whole pairing is refused.
+    assert_eq!(
+        positional.join_shapes(&PhpType::parse("array{0: 1, 1: 'b'}")),
+        None
+    );
+
+    // An empty shape shares no key with anything, so it must not be free
+    // to absorb an unrelated positional shape just because nothing
+    // contradicts it.
+    assert_eq!(positional.join_shapes(&PhpType::parse("array{}")), None);
+}
+
+#[test]
 fn join_shapes_key_order_is_first_side_then_new_keys() {
     let a = PhpType::parse("array{b: int, a: int}");
     let b = PhpType::parse("array{c: int, a: int}");
