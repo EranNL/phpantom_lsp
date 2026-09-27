@@ -2,7 +2,11 @@
 //! leaves in the caller's variable, including a PHPStan conditional keyed
 //! on what the caller passed.
 
-use crate::common::{create_test_backend, hover_at, hover_text};
+use tower_lsp::lsp_types::Url;
+
+use crate::common::{
+    create_test_backend, hover_at, hover_text, line_char_of, markup_hover_at, open_php,
+};
 
 const OUT_PARAM_CLASSES: &str = r#"
 class A {}
@@ -100,5 +104,43 @@ function f(): void {{
     assert!(
         text.contains("int") && !text.contains("string"),
         "expected $n to read as int after count(), got: {text}"
+    );
+}
+
+/// Each `return` leaves the parameter holding what it held there, so a
+/// body whose every path returns reads back as the join of those, and the
+/// closing brace no path reaches adds nothing.
+#[tokio::test]
+async fn every_return_contributes_to_the_out_type() {
+    let content = r#"<?php
+/** @param-out int $s */
+function fill(?string &$s): void {
+    if ($s === null) {
+        $s = 5;
+        return;
+    }
+    if ($s === '') {
+        $s = 6;
+        return;
+    } else {
+        $s = 7;
+        return;
+    }
+}
+function f(): void {
+    fill($a);
+    $a;
+}
+"#;
+    // The body is read back from the open document, so it has to be opened
+    // rather than only parsed.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///test.php").unwrap();
+    open_php(&backend, &uri, content).await;
+    let (line, character) = line_char_of(content, "$a;");
+    let text = markup_hover_at(&backend, &uri, line, character).await;
+    assert!(
+        text.contains('5') && text.contains('6') && text.contains('7') && !text.contains("string"),
+        "expected $a to read as 5|6|7 after fill(), got: {text}"
     );
 }

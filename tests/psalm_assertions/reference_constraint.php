@@ -18,7 +18,7 @@ namespace PsalmTest_reference_constraint_1 {
 
     addFoo($a);
 
-    assertType('4|5', $a); // SKIP: an out type read from the callee's body ignores the paths that return early
+    assertType('4|5', $a);
 }
 
 // Test: paramOutReturn
@@ -52,6 +52,6 @@ namespace PsalmTest_reference_constraint_3 {
 
     addFoo(s: $a);
 
-    assertType('4|5', $a); // SKIP: an out type read from the callee's body ignores the paths that return early
+    assertType('4|5', $a);
 }
 

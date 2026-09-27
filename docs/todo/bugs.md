@@ -122,28 +122,3 @@ initializer that names another constant does not fold at all.
 The SKIPs are in `tests/psalm_assertions/php56.php` and
 `array_assignment.php`. Found porting Psalm's `Php56Test.php` and
 `ArrayAssignmentTest.php`.
-
-### B531. An out type read from the callee's body ignores the paths that return early
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param-out int $s */
-function addFoo(?string &$s): void {
-    if ($s === null) {
-        $s = 5;
-        return;
-    }
-    $s = 4;
-}
-addFoo($a);
-// 4, should be 4|5
-```
-
-`read_out_type` (`type_engine/call_resolution/out_param.rs`) resolves the
-parameter at the body's closing brace, which only the fall-through paths
-reach. A `return` leaves the parameter holding whatever it held there, so
-each `return` has to contribute to the join too. The reading narrows the
-declared `@param-out int`, so the wrong literal comes out looking precise.
-
-Found porting Psalm's `ReferenceConstraintTest.php`.

@@ -15,9 +15,9 @@
 //! the reading stands on its own.
 //!
 //! The walk goes through [`resolve_variable_php_type`] — the same forward
-//! walker every other consumer asks — so branch merging, early returns
-//! and narrowing are accounted for by the shared pipeline rather than by
-//! a second one written here.
+//! walker every other consumer asks — at each point the body can be left
+//! through, so branch merging and narrowing are accounted for by the
+//! shared pipeline rather than by a second one written here.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use mago_syntax::cst::Program;
 use mago_syntax::cst::argument::ArgumentList;
+use mago_syntax::cst::block::Block;
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::MethodBody;
 use mago_syntax::cst::statement::Statement;
@@ -298,12 +299,14 @@ fn infer_out_type(
     )
 }
 
-/// Resolve `param_name` at the closing brace of the body declared at
-/// `name_offset` in `uri`.
+/// Resolve `param_name` at every point the body declared at `name_offset`
+/// in `uri` can leave through, and join the readings.
 ///
 /// The closing brace is where the fall-through paths have all merged, so
 /// a parameter every path assigns reads back as what they assigned and one
 /// only some paths touch reads back as the join with its declared type.
+/// A `return` leaves the parameter holding whatever it held there, which
+/// the closing brace never sees, so each one is read too.
 fn read_out_type(
     backend: &Backend,
     uri: &str,
@@ -333,9 +336,10 @@ fn read_out_type(
     // The request's parse cache holds only the request's own file, so this
     // one parse serves both finding the body and walking it.
     let types = with_parsed_program(&content, "out_param_body", |program, content| {
-        let Some(body_end) = body_close_offset(program, name_offset) else {
+        let Some(body) = body_block(program, name_offset) else {
             return Vec::new();
         };
+        let body_end = body.right_brace.start.offset;
         let enclosing_class = file_ctx.classes.iter().find(|c| {
             !c.name.starts_with("__anonymous@")
                 && body_end >= c.start_offset
@@ -349,36 +353,64 @@ fn read_out_type(
                 &placeholder
             }
         };
-        crate::type_engine::variable::resolution::resolve_variable_types_in_program(
-            program,
-            param_name,
+        let loaders = Loaders::with_function(Some(&function_loader));
+
+        let mut returns = Vec::new();
+        crate::return_collection::collect_returns(body.statements.iter(), &mut returns);
+        let exit_ctx = crate::type_engine::types::narrowing::ExitCtx {
             current_class,
-            &file_ctx.classes,
-            content,
-            body_end,
-            &class_loader,
-            Some(backend),
-            Loaders::with_function(Some(&function_loader)),
-        )
+            all_classes: &file_ctx.classes,
+            class_loader: &class_loader,
+            function_loader: loaders.function_loader,
+            resolved_class_cache: crate::virtual_members::active_resolved_class_cache(),
+            var_types: None,
+            receiver_resolver: None,
+        };
+        // The walker reads a position no path reaches as the state before
+        // the statement that left, so a body whose every path returns
+        // would add a stale reading from its closing brace.
+        let falls_through = !body.statements.iter().any(|stmt| {
+            crate::type_engine::types::narrowing::statement_unconditionally_exits(stmt, &exit_ctx)
+        });
+        let exits = returns
+            .iter()
+            .map(|&(_, _, _, return_keyword)| return_keyword as u32)
+            .chain(falls_through.then_some(body_end));
+
+        exits
+            .flat_map(|exit| {
+                crate::type_engine::variable::resolution::resolve_variable_types_in_program(
+                    program,
+                    param_name,
+                    current_class,
+                    &file_ctx.classes,
+                    content,
+                    exit,
+                    &class_loader,
+                    Some(backend),
+                    loaders,
+                )
+            })
+            .collect()
     });
     (!types.is_empty()).then(|| crate::types::ResolvedType::types_joined(&types))
 }
 
-/// The offset of the closing brace of the function or method whose name
-/// token starts at `name_offset`.
+/// The body of the function or method whose name token starts at
+/// `name_offset`.
 ///
 /// `None` for a declaration with no body (abstract, interface) and for an
 /// offset that names nothing in this file, which is what a stale index
 /// entry looks like.
-fn body_close_offset(program: &Program<'_>, name_offset: u32) -> Option<u32> {
+fn body_block<'a>(program: &'a Program<'a>, name_offset: u32) -> Option<&'a Block<'a>> {
     fn in_statements<'a>(
         statements: impl Iterator<Item = &'a Statement<'a>>,
         name_offset: u32,
-    ) -> Option<u32> {
+    ) -> Option<&'a Block<'a>> {
         for stmt in statements {
             let found = match stmt {
                 Statement::Function(func) if func.name.span.start.offset == name_offset => {
-                    Some(func.body.right_brace.start.offset)
+                    Some(&func.body)
                 }
                 Statement::Class(class) => in_members(class.members.iter(), name_offset),
                 Statement::Trait(tr) => in_members(tr.members.iter(), name_offset),
@@ -398,13 +430,13 @@ fn body_close_offset(program: &Program<'_>, name_offset: u32) -> Option<u32> {
     fn in_members<'a>(
         members: impl Iterator<Item = &'a ClassLikeMember<'a>>,
         name_offset: u32,
-    ) -> Option<u32> {
+    ) -> Option<&'a Block<'a>> {
         for member in members {
             if let ClassLikeMember::Method(method) = member
                 && method.name.span.start.offset == name_offset
                 && let MethodBody::Concrete(block) = &method.body
             {
-                return Some(block.right_brace.start.offset);
+                return Some(block);
             }
         }
         None
