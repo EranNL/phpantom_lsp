@@ -146,6 +146,30 @@ pub(crate) fn find_class_by_name<'a>(
     }
 }
 
+/// Find the class in a slice whose fully-qualified name is `fqn`.
+///
+/// Unlike [`find_class_by_name`], a name without a namespace only matches a
+/// global class, so a resolved name never lands on a same-named class of
+/// another namespace block.
+pub(crate) fn find_class_by_fqn<'a>(
+    all_classes: &'a [Arc<ClassInfo>],
+    fqn: &str,
+) -> Option<&'a Arc<ClassInfo>> {
+    let fqn = fqn.strip_prefix('\\').unwrap_or(fqn);
+    let (namespace, short) = match fqn.rsplit_once('\\') {
+        Some((namespace, short)) => (Some(namespace), short),
+        None => (None, fqn),
+    };
+    all_classes.iter().find(|c| {
+        c.name.eq_ignore_ascii_case(short)
+            && match (c.file_namespace.as_deref(), namespace) {
+                (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                (None, None) => true,
+                _ => false,
+            }
+    })
+}
+
 /// The class a class-position expression names, as written.
 ///
 /// Covers the four spellings a `Foo::bar()`, `new Foo`, `Foo::CONST`, or

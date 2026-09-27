@@ -452,22 +452,14 @@ fn resolve_target_classes_expr_inner(
                     class_loader(&parent_name).into_iter().collect()
                 }
             } else {
-                if let Some(cls) = find_class_by_name(all_classes, class) {
-                    vec![Arc::clone(cls)]
-                } else {
-                    // `Foo::` is a source-level reference: PHP resolves an
-                    // unqualified name against the current namespace before
-                    // the global scope, so a same-namespace class must win
-                    // over a global class of the same short name.
-                    let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-                    let fqn = crate::util::resolve_source_class_name(
-                        class,
-                        ns,
-                        all_classes,
-                        class_loader,
-                    );
-                    class_loader(&fqn).into_iter().collect()
-                }
+                // `Foo::` is a source-level reference: PHP resolves an
+                // unqualified name against the current namespace before
+                // the global scope, so a same-namespace class must win
+                // over a global class of the same short name.
+                let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                let fqn =
+                    crate::util::resolve_source_class_name(class, ns, all_classes, class_loader);
+                class_loader(&fqn).into_iter().collect()
             };
 
             // When the member is a static property (starts with `$`),
@@ -534,9 +526,6 @@ fn resolve_target_classes_expr_inner(
         // ── A bare class name, and `new ClassName` without trailing
         //    call parens, are the same reference written two ways ──
         SubjectExpr::ClassName(name) | SubjectExpr::NewExpr { class_name: name } => {
-            if let Some(cls) = find_class_by_name(all_classes, name) {
-                return vec![ResolvedType::from_arc(Arc::clone(cls))];
-            }
             // Both are source-level references: PHP resolves an
             // unqualified name against the current namespace before the
             // global scope, so a same-namespace class must win over a
@@ -1815,18 +1804,18 @@ pub(in crate::type_engine) fn resolve_static_owner_class(
         // parent — load via class_loader so we get the full parent ClassInfo
         (rctx.class_loader)(&resolved_name)
     } else {
-        find_class_by_name(rctx.all_classes, class)
-            .map(Arc::clone)
-            .or_else(|| (rctx.class_loader)(class))
-            .or_else(|| {
-                resolved_to_arcs(resolve_target_classes(
-                    class,
-                    crate::AccessKind::DoubleColon,
-                    rctx,
-                ))
-                .into_iter()
-                .next()
-            })
+        let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
+        let fqn =
+            crate::util::resolve_source_class_name(class, ns, rctx.all_classes, rctx.class_loader);
+        (rctx.class_loader)(&fqn).or_else(|| {
+            resolved_to_arcs(resolve_target_classes(
+                class,
+                crate::AccessKind::DoubleColon,
+                rctx,
+            ))
+            .into_iter()
+            .next()
+        })
     }
 }
 

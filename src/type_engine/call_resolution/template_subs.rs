@@ -1089,7 +1089,7 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
                             ctx.class_loader,
                         )
                     });
-            let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
+            let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
                 .cloned()
                 .or_else(|| (ctx.class_loader)(&class_name))?;
             let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
@@ -1269,7 +1269,7 @@ fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<Php
                 ctx.class_loader,
             )
         });
-    let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
+    let class = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &class_name)
         .cloned()
         .or_else(|| (ctx.class_loader)(&class_name))?;
     if class.kind != crate::types::ClassLikeKind::Enum {

@@ -569,12 +569,14 @@ impl Backend {
             // Extract all three in a single parse pass.
             //
             // `classes_with_ns` tracks each extracted class together with the
-            // namespace block it was declared in.  This is critical for files
-            // that contain multiple `namespace { }` blocks, each declaring
-            // classes under a different namespace.  The per-class namespace is
-            // used later when building the `fqn_uri_index` and when resolving
-            // parent/trait names.
-            let mut classes_with_ns: Vec<(ClassInfo, Option<String>)> = Vec::new();
+            // namespace block it was declared in (its namespace, and its index
+            // in `namespace_spans`, or `None` outside any block).  This is
+            // critical for files that contain multiple `namespace { }` blocks,
+            // each declaring classes under a different namespace with its own
+            // imports.  The per-class namespace is used later when building
+            // the `fqn_uri_index`, and the block when resolving parent/trait
+            // names.
+            let mut classes_with_ns: Vec<(ClassInfo, Option<String>, Option<usize>)> = Vec::new();
             let mut use_map = HashMap::new();
             let mut namespace: Option<String> = None;
             let mut namespace_spans: Vec<NamespaceSpan> = Vec::new();
@@ -591,13 +593,6 @@ impl Backend {
                             .map(|ident| bytes_to_str(ident.value()).to_string())
                             .filter(|n| !n.is_empty());
 
-                        let ns_span = ns.span();
-                        namespace_spans.push(NamespaceSpan {
-                            namespace: block_ns.clone(),
-                            start: ns_span.start.offset,
-                            end: ns_span.end.offset,
-                        });
-
                         // The file-level namespace is the FIRST non-empty one.
                         if namespace.is_none() {
                             namespace = block_ns.clone();
@@ -606,10 +601,11 @@ impl Backend {
                         // Collect classes from this namespace block, tagging
                         // each with the block's namespace.
                         let mut block_classes = Vec::new();
+                        let mut block_use_map = HashMap::new();
                         for inner in ns.statements().iter() {
                             match inner {
                                 Statement::Use(use_stmt) => {
-                                    Self::extract_use_items(&use_stmt.items, &mut use_map);
+                                    Self::extract_use_items(&use_stmt.items, &mut block_use_map);
                                 }
                                 inner if Self::is_classlike_extraction_candidate(inner) => {
                                     Self::extract_classes_from_statements(
@@ -622,7 +618,7 @@ impl Backend {
                                     // Nested namespaces (rare but valid)
                                     Self::extract_use_statements_from_statements(
                                         inner_ns.statements().iter(),
-                                        &mut use_map,
+                                        &mut block_use_map,
                                     );
                                     Self::extract_classes_from_statements(
                                         inner_ns.statements().iter(),
@@ -642,9 +638,18 @@ impl Backend {
                             }
                         }
 
+                        let block_index = namespace_spans.len();
                         for cls in block_classes {
-                            classes_with_ns.push((cls, block_ns.clone()));
+                            classes_with_ns.push((cls, block_ns.clone(), Some(block_index)));
                         }
+
+                        let ns_span = ns.span();
+                        namespace_spans.push(NamespaceSpan {
+                            namespace: block_ns,
+                            start: ns_span.start.offset,
+                            end: ns_span.end.offset,
+                            use_map: block_use_map,
+                        });
                     }
                     statement if Self::is_classlike_extraction_candidate(statement) => {
                         // A template whose `$this` is bound wraps its body
@@ -659,7 +664,7 @@ impl Backend {
                             Some(&doc_ctx),
                         );
                         for cls in top_classes {
-                            classes_with_ns.push((cls, None));
+                            classes_with_ns.push((cls, None, None));
                         }
                     }
                     // Laravel compiles a template's `@php` and `<?php`
@@ -686,24 +691,40 @@ impl Backend {
                             Some(&doc_ctx),
                         );
                         for cls in anon_classes {
-                            classes_with_ns.push((cls, None));
+                            classes_with_ns.push((cls, None, None));
                         }
                     }
+                }
+            }
+
+            // The file-wide table holds every block's imports.  A file with
+            // one block keeps them only there (see `NamespaceSpan::use_map`).
+            let multi_block = namespace_spans.len() > 1;
+            for span in &mut namespace_spans {
+                if multi_block {
+                    use_map.extend(
+                        span.use_map
+                            .iter()
+                            .map(|(alias, fqn)| (alias.clone(), fqn.clone())),
+                    );
+                } else {
+                    use_map.extend(std::mem::take(&mut span.use_map));
                 }
             }
 
             // A class-like declared in two branches of a conditional yields
             // one entry per branch; keep the first so resolution is
             // deterministic (see `dedup_class_likes_first_wins`).
-            Self::dedup_class_likes_first_wins(&mut classes_with_ns);
+            Self::dedup_class_likes_first_wins(&mut classes_with_ns, |(cls, ns, _)| (cls, ns));
 
             // Extract standalone functions (including those inside if-guards
             // like `if (! function_exists('...'))`) using the shared helper
             // which recurses into if/block statements.
             let mut functions = Vec::new();
-            // Update doc_ctx with the file's use-map and namespace so that
-            // parameter default values (e.g. `Application::class`) can be
-            // resolved to FQNs during extraction.
+            // Update doc_ctx with the use-map and namespace in force where
+            // each function is declared so that parameter default values
+            // (e.g. `Application::class`) can be resolved to FQNs during
+            // extraction.
             let func_doc_ctx = DocblockCtx {
                 trivias: doc_ctx.trivias,
                 content: doc_ctx.content,
@@ -711,12 +732,29 @@ impl Backend {
                 use_map: use_map.clone(),
                 namespace: namespace.clone(),
             };
-            Self::extract_functions_from_statements(
-                program.statements.iter(),
-                &mut functions,
-                &namespace,
-                Some(&func_doc_ctx),
-            );
+            let mut block_index = 0;
+            for statement in program.statements.iter() {
+                let block = match statement {
+                    Statement::Namespace(_) if multi_block => {
+                        block_index += 1;
+                        Some(&namespace_spans[block_index - 1])
+                    }
+                    _ => None,
+                };
+                let block_doc_ctx = block.map(|span| DocblockCtx {
+                    trivias: doc_ctx.trivias,
+                    content: doc_ctx.content,
+                    php_version: doc_ctx.php_version,
+                    use_map: span.use_map.clone(),
+                    namespace: span.namespace.clone(),
+                });
+                Self::extract_functions_from_statements(
+                    std::iter::once(statement),
+                    &mut functions,
+                    &namespace,
+                    Some(block_doc_ctx.as_ref().unwrap_or(&func_doc_ctx)),
+                );
+            }
 
             // Drop the declarations the Blade lowering wrote itself: the
             // wrapper holding the template body and the prologue's marker
@@ -744,7 +782,7 @@ impl Backend {
                 for func in &mut functions {
                     crate::stub_patches::apply_function_stub_patches(func);
                 }
-                for (cls, _) in &mut classes_with_ns {
+                for (cls, _, _) in &mut classes_with_ns {
                     crate::stub_patches::apply_class_stub_patches(cls);
                 }
             }
@@ -762,7 +800,17 @@ impl Backend {
                     // so that multi-namespace files resolve return types
                     // against the correct namespace block.
                     let func_ns = func.namespace.clone().or_else(|| namespace.clone());
-                    let resolver = Self::build_type_resolver(&use_map, &func_ns, &skip_names);
+                    let func_use_map = if multi_block {
+                        namespace_spans
+                            .iter()
+                            .find(|span| {
+                                func.name_offset >= span.start && func.name_offset <= span.end
+                            })
+                            .map_or(&use_map, |span| &span.use_map)
+                    } else {
+                        &use_map
+                    };
+                    let resolver = Self::build_type_resolver(func_use_map, &func_ns, &skip_names);
 
                     if let Some(ref ret) = func.return_type {
                         let resolved = ret.resolve_names(&resolver);
@@ -837,46 +885,14 @@ impl Backend {
                 .collect();
 
             // Post-process: resolve parent_class short names to fully-qualified
-            // names using the file's use_map and each class's own namespace so
-            // that cross-file inheritance resolution can find parent classes via
-            // PSR-4.
-            //
-            // For files with multiple namespace blocks, each class's names are
-            // resolved against its own namespace rather than the file-level
-            // default.  This is done by grouping classes by namespace and
-            // calling resolve_parent_class_names once per group.
-            {
-                // Gather distinct namespaces used in this file.
-                let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-                for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-                    ns_groups.entry(ns.clone()).or_default().push(i);
-                }
-
-                // When all classes share the same namespace, take the fast
-                // path (single call, no extra allocation).
-                if ns_groups.len() <= 1 {
-                    let mut classes: Vec<ClassInfo> =
-                        classes_with_ns.iter().map(|(c, _)| c.clone()).collect();
-                    Self::resolve_parent_class_names(&mut classes, &use_map, &namespace);
-                    // Write back
-                    for (i, cls) in classes.into_iter().enumerate() {
-                        classes_with_ns[i].0 = cls;
-                    }
-                } else {
-                    // Multi-namespace file: resolve each group with its own
-                    // namespace context.
-                    for (group_ns, indices) in &ns_groups {
-                        let mut group: Vec<ClassInfo> = indices
-                            .iter()
-                            .map(|&i| classes_with_ns[i].0.clone())
-                            .collect();
-                        Self::resolve_parent_class_names(&mut group, &use_map, group_ns);
-                        for (j, &idx) in indices.iter().enumerate() {
-                            classes_with_ns[idx].0 = group[j].clone();
-                        }
-                    }
-                }
-            }
+            // names so that cross-file inheritance resolution can find parent
+            // classes via PSR-4.
+            Self::resolve_parent_class_names_by_block(
+                &mut classes_with_ns,
+                &namespace_spans,
+                &use_map,
+                &namespace,
+            );
 
             // Separate the classes from their namespace tags for storage,
             // stamping each ClassInfo with its namespace so that
@@ -884,7 +900,7 @@ impl Backend {
             // short name in different namespace blocks.
             let classes: Vec<ClassInfo> = classes_with_ns
                 .iter()
-                .map(|(c, ns)| {
+                .map(|(c, ns, _)| {
                     let mut cls = c.clone();
                     cls.file_namespace = ns.as_deref().map(atom);
                     cls.cache_fqn_in_uri(uri);
@@ -907,6 +923,7 @@ impl Backend {
                     namespace: namespace.clone(),
                     start: 0,
                     end: content.len() as u32,
+                    use_map: HashMap::new(),
                 });
             }
 
@@ -1498,6 +1515,53 @@ impl Backend {
         }
 
         changed
+    }
+
+    /// [`resolve_parent_class_names`](Self::resolve_parent_class_names)
+    /// for every class of a file, each against the `namespace` block that
+    /// declared it.
+    ///
+    /// `classes` pairs each class with its namespace and the index of its
+    /// block in `blocks` (`None` outside any block).  PHP scopes both the
+    /// namespace and the `use` imports to a block, so in a file with several
+    /// blocks each block's classes are resolved with that block's own
+    /// imports.  A file with at most one block resolves everything against
+    /// the file-wide `use_map` and `namespace` in one pass.
+    pub(crate) fn resolve_parent_class_names_by_block(
+        classes: &mut [(ClassInfo, Option<String>, Option<usize>)],
+        blocks: &[NamespaceSpan],
+        use_map: &HashMap<String, String>,
+        namespace: &Option<String>,
+    ) {
+        let multi_block = blocks.len() > 1;
+        let mut groups: Vec<Option<usize>> = Vec::new();
+        for (_, _, block) in classes.iter() {
+            let key = if multi_block { *block } else { None };
+            if !groups.contains(&key) {
+                groups.push(key);
+            }
+        }
+        for group in groups {
+            let indices: Vec<usize> = (0..classes.len())
+                .filter(|&i| !multi_block || classes[i].2 == group)
+                .collect();
+            let mut members: Vec<ClassInfo> = indices
+                .iter()
+                .map(|&i| std::mem::take(&mut classes[i].0))
+                .collect();
+            match group.and_then(|b| blocks.get(b)) {
+                Some(block) => {
+                    Self::resolve_parent_class_names(&mut members, &block.use_map, &block.namespace)
+                }
+                None if multi_block => {
+                    Self::resolve_parent_class_names(&mut members, use_map, &None)
+                }
+                None => Self::resolve_parent_class_names(&mut members, use_map, namespace),
+            }
+            for (cls, &i) in members.into_iter().zip(&indices) {
+                classes[i].0 = cls;
+            }
+        }
     }
 
     /// Resolve `parent_class` short names in a list of `ClassInfo` to

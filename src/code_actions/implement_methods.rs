@@ -31,9 +31,8 @@ impl Backend {
         params: &CodeActionParams,
         out: &mut Vec<CodeActionOrCommand>,
     ) {
-        let ctx = self.file_context(uri);
-
         let cursor_offset = crate::text_position::position_to_offset(content, params.range.start);
+        let ctx = self.file_context_at(uri, cursor_offset);
 
         // Find the class the cursor is inside. `find_class_at_offset`'s
         // lower bound also covers the `class Foo implements Bar`

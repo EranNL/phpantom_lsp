@@ -6,7 +6,6 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::Backend;
-use crate::class_lookup::find_class_by_name;
 use crate::class_lookup::resolve_class_keyword;
 use crate::docblock;
 use crate::php_type::{PhpType, TypeKind};
@@ -342,9 +341,14 @@ impl Backend {
                     {
                         class_loader(&resolved).map(Arc::unwrap_or_clone)
                     } else {
-                        find_class_by_name(all_classes, class)
-                            .map(|arc| ClassInfo::clone(arc))
-                            .or_else(|| class_loader(class).map(Arc::unwrap_or_clone))
+                        let ns = current_class.and_then(|c| c.file_namespace.as_deref());
+                        let fqn = crate::util::resolve_source_class_name(
+                            class,
+                            ns,
+                            all_classes,
+                            class_loader,
+                        );
+                        class_loader(&fqn).map(Arc::unwrap_or_clone)
                     };
                     if let Some(ref cls) = owner
                         && let Some(rt) = crate::inheritance::resolve_method_return_type(

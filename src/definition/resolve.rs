@@ -351,7 +351,7 @@ impl Backend {
 
                 // Build FQN candidates: the resolved name, the raw name,
                 // and (if namespaced) the namespace-qualified version.
-                let ctx = self.file_context(uri);
+                let ctx = self.file_context_at(uri, cursor_offset);
 
                 // An unqualified `@see name()` names the documented class's
                 // own member first, as phpDocumentor reads it, and only

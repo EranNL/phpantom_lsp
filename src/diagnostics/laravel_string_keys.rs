@@ -505,7 +505,7 @@ impl Backend {
             )
         };
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, span_start);
         let class_loader = self.class_loader(&ctx);
         let function_loader = self.function_loader(&ctx);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {

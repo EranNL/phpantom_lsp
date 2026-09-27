@@ -224,10 +224,16 @@ impl Backend {
     /// as PHPStan/Psalm. This must run before the classes reach
     /// `fqn_class_index`, whose insert is last-wins and would otherwise pick
     /// the wrong (later) branch.
-    pub(crate) fn dedup_class_likes_first_wins(items: &mut Vec<(ClassInfo, Option<String>)>) {
+    pub(crate) fn dedup_class_likes_first_wins<T>(
+        items: &mut Vec<T>,
+        class_and_namespace: impl Fn(&T) -> (&ClassInfo, &Option<String>),
+    ) {
         let mut seen: std::collections::HashSet<(Atom, Option<String>)> =
             std::collections::HashSet::new();
-        items.retain(|(cls, ns)| seen.insert((cls.name, ns.clone())));
+        items.retain(|item| {
+            let (cls, ns) = class_and_namespace(item);
+            seen.insert((cls.name, ns.clone()))
+        });
     }
 
     /// Whether `stmt` may itself declare a class-like, or contain one

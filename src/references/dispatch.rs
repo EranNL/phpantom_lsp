@@ -222,7 +222,7 @@ impl Backend {
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
-                let fqn = build_fqn(name, ctx.namespace.as_deref());
+                let fqn = build_fqn(name, ctx.namespace_at(span_start).as_deref());
                 self.find_class_references(&fqn, include_declaration)
             }
             SymbolKind::MemberAccess {

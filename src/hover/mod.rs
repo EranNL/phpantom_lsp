@@ -986,7 +986,7 @@ impl Backend {
             return None;
         }
 
-        let ctx = self.file_context(uri);
+        let ctx = self.file_context_at(uri, cursor_offset as u32);
         let call_expr = match &sc.subject {
             Some(subj) if sc.is_static => format!("{}::{}", subj, sc.method_name),
             Some(subj) => format!("{}->{}", subj, sc.method_name),

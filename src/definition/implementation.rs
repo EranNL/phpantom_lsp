@@ -67,7 +67,7 @@ impl Backend {
                 // Member access — delegate directly to member implementation
                 // resolution using the structured symbol information.
                 SymbolKind::MemberAccess { member_name, .. } => {
-                    let ctx = self.file_context(uri);
+                    let ctx = self.file_context_at(uri, sym.start);
                     return self.resolve_member_implementations(
                         uri,
                         content,
@@ -78,13 +78,13 @@ impl Backend {
                 }
                 // Class reference or declaration — resolve as a class/interface name.
                 SymbolKind::ClassReference { name, .. } | SymbolKind::ClassDeclaration { name } => {
-                    let ctx = self.file_context(uri);
+                    let ctx = self.file_context_at(uri, sym.start);
                     return self.resolve_class_implementation(uri, content, name, &ctx, sym.start);
                 }
                 // self/static/parent — resolve the keyword to the current
                 // class and check whether it is an interface/abstract.
                 SymbolKind::SelfStaticParent(ssp_kind) => {
-                    let ctx = self.file_context(uri);
+                    let ctx = self.file_context_at(uri, sym.start);
                     let class_loader = self.class_loader(&ctx);
                     let current_class = find_class_at_offset(&ctx.classes, sym.start);
                     let target = match ssp_kind {
@@ -102,7 +102,7 @@ impl Backend {
                 // Member declaration — reverse jump: from a concrete method
                 // definition to the interface/abstract method it implements.
                 SymbolKind::MemberDeclaration { name, .. } => {
-                    let ctx = self.file_context(uri);
+                    let ctx = self.file_context_at(uri, sym.start);
                     let class_loader = self.class_loader(&ctx);
                     let current_class = find_class_at_offset(&ctx.classes, sym.start);
                     if let Some(cls) = current_class {

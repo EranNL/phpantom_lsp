@@ -155,7 +155,7 @@ impl Backend {
         let Some(classes) = self.symbols.uri_classes_index.read().get(uri).cloned() else {
             return;
         };
-        let class_loader = self.class_loader(ctx);
+        let class_loaders = self.class_loaders(ctx);
 
         for class in &classes {
             if class.keyword_offset == 0
@@ -168,7 +168,7 @@ impl Backend {
             let implementors = self.find_implementors(
                 &class.name,
                 &class.fqn(),
-                &class_loader,
+                class_loaders.at(class.keyword_offset),
                 false,
                 false,
                 true,

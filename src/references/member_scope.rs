@@ -208,9 +208,13 @@ impl Backend {
             }
             None => self.resolve_static_laravel_builder_subject_to_fqns(
                 subject_text,
-                &ctx.use_map,
+                ctx.use_map_at(access_offset),
                 ctx.namespace_at(access_offset),
-                &self.class_loader(ctx),
+                &self.class_loader_with(
+                    &ctx.classes,
+                    ctx.use_map_at(access_offset),
+                    ctx.namespace_at(access_offset),
+                ),
             ),
         }
     }
@@ -225,12 +229,15 @@ impl Backend {
         access_offset: u32,
         content: &str,
     ) -> Option<crate::php_type::PhpType> {
-        let class_loader = self.class_loader(ctx);
-        let function_loader = self.function_loader(ctx);
+        let use_map = ctx.use_map_at(access_offset);
+        let namespace = ctx.namespace_at(access_offset);
+        let class_loader = self.class_loader_with(&ctx.classes, use_map, namespace);
+        let function_loader =
+            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace);
         let resolution_ctx = crate::type_engine::subject_resolution::SubjectResolutionCtx {
             local_classes: &ctx.classes,
-            use_map: &ctx.use_map,
-            namespace: ctx.namespace_at(access_offset),
+            use_map,
+            namespace,
             content,
             class_loader: &class_loader,
             backend: Some(self),
@@ -264,7 +271,7 @@ impl Backend {
                 } else {
                     normalize_fqn(&Self::resolve_to_fqn(
                         &normalized,
-                        &ctx.use_map,
+                        ctx.use_map_at(access_offset),
                         ctx.namespace_at(access_offset),
                     ))
                 }

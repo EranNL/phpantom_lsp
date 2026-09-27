@@ -11,6 +11,7 @@ use crate::atom::bytes_to_str;
 use crate::parser::{extract_hint_type, with_parsed_program};
 use crate::php_type::PhpType;
 use crate::type_engine::resolver::Loaders;
+use crate::types::BlockClassLoaders;
 use crate::types::{ClassInfo, ResolvedType};
 
 #[cfg(test)]
@@ -951,7 +952,7 @@ pub(crate) fn seed_closure_params(
 pub(crate) fn build_diagnostic_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loaders: &BlockClassLoaders<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -973,7 +974,7 @@ pub(crate) fn build_diagnostic_scopes(
     walk_file_for_scopes(
         content,
         local_classes,
-        class_loader,
+        class_loaders,
         backend,
         loaders,
         resolved_class_cache,
@@ -1000,7 +1001,7 @@ pub(crate) fn build_diagnostic_scopes(
 pub(crate) fn build_diagnostic_scopes_for_offsets(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loaders: &BlockClassLoaders<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -1030,7 +1031,7 @@ pub(crate) fn build_diagnostic_scopes_for_offsets(
     walk_file_for_scopes(
         content,
         local_classes,
-        class_loader,
+        class_loaders,
         backend,
         loaders,
         resolved_class_cache,
@@ -1049,7 +1050,7 @@ fn scopes_populated() -> bool {
 fn walk_file_for_scopes(
     content: &str,
     local_classes: &[Arc<ClassInfo>],
-    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    class_loaders: &BlockClassLoaders<'_>,
     backend: Option<&crate::Backend>,
     loaders: Loaders<'_>,
     resolved_class_cache: Option<&crate::virtual_members::ResolvedClassCache>,
@@ -1065,7 +1066,8 @@ fn walk_file_for_scopes(
     let diag_ctx = DiagnosticWalkCtx {
         content,
         local_classes,
-        class_loader,
+        class_loader: *class_loaders.at(0),
+        class_loaders,
         backend,
         loaders,
         resolved_class_cache,
@@ -1125,7 +1127,12 @@ pub(crate) fn walk_top_level_statements<'a, 'b: 'a>(
                 let ns_class = crate::class_lookup::placeholder_in_namespace(
                     ns.name.as_ref().map(|ident| bytes_to_str(ident.value())),
                 );
-                walk_top_level_statements(ns.statements().iter(), &ns_class, diag_ctx);
+                // The block's own imports apply inside it, not the file's.
+                let block_ctx = DiagnosticWalkCtx {
+                    class_loader: *diag_ctx.class_loaders.at(ns.span().start.offset),
+                    ..*diag_ctx
+                };
+                walk_top_level_statements(ns.statements().iter(), &ns_class, &block_ctx);
             }
             Statement::Class(class) => {
                 if !diag_ctx.wants(stmt.span()) {
@@ -1390,10 +1397,14 @@ fn walk_property_hook_bodies(
 
 /// Bundles the immutable context needed by [`analyze_function_body`] and
 /// the AST walkers so we don't pass 5+ individual arguments everywhere.
+#[derive(Clone, Copy)]
 pub(crate) struct DiagnosticWalkCtx<'a> {
     content: &'a str,
     local_classes: &'a [Arc<ClassInfo>],
+    /// The loader for the `namespace` block being walked.
     class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    /// Every block's loader, to switch to at a block boundary.
+    class_loaders: &'a BlockClassLoaders<'a>,
     backend: Option<&'a crate::Backend>,
     loaders: Loaders<'a>,
     resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,

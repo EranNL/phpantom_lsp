@@ -134,7 +134,7 @@ impl Backend {
         // user can change the namespace to move the class.
         let placeholder = if let SymbolKind::ClassDeclaration { ref name } = span.kind {
             let ctx = self.file_context(uri);
-            build_fqn(name, ctx.namespace.as_deref())
+            build_fqn(name, ctx.namespace_at(span.start).as_deref())
         } else {
             name
         };

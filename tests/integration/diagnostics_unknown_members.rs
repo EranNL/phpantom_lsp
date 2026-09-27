@@ -14378,3 +14378,54 @@ class Sorter {
         "Bounded template values should resolve their bound's members, got: {diags:?}"
     );
 }
+
+/// Two `namespace` blocks importing the same short name from different
+/// namespaces each see their own class: through a parameter type, a `new`
+/// expression, an inherited parent, and a function's return type.
+#[test]
+fn each_namespace_block_resolves_names_through_its_own_imports() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let text = r#"<?php
+namespace X {
+    class Foo { public function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    class ChildA extends Foo {
+        public function run(Foo $f): void {
+            $f->fromX();
+            (new Foo)->fromX();
+            $this->fromX();
+        }
+    }
+    function a(Foo $f): Foo { $f->fromX(); return new Foo(); }
+    a(new Foo())->fromX();
+}
+namespace B {
+    use Y\Foo;
+    class ChildB extends Foo {
+        public function run(Foo $f): void {
+            $f->fromY();
+            (new Foo)->fromY();
+            $this->fromY();
+        }
+    }
+    function b(Foo $f): Foo { $f->fromY(); return new Foo(); }
+    b(new Foo())->fromY();
+}
+"#;
+
+    let diags = unknown_member_diagnostics_with_scope_cache(&backend, uri, text);
+    assert!(
+        diags.is_empty(),
+        "each block should resolve `Foo` through its own import, got: {:?}",
+        diags
+            .iter()
+            .map(|d| (d.range.start.line, &d.message))
+            .collect::<Vec<_>>()
+    );
+}

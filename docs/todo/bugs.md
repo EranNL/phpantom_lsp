@@ -45,37 +45,52 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B541. A `use` import in one `namespace` block applies to every block in the file
+### B542. Import edits treat a file with several `namespace` blocks as having one `use` list
 
 **Impact: Low · Complexity: Medium**
 
 ```php
-namespace X {
-    class Foo { public function onlyX(): void {} }
-}
 namespace A {
     use X\Foo;
-    function a(): void { (new Foo)->onlyX(); }
+    function a(): Foo {}
 }
 namespace B {
-    // `Foo` here is `B\Foo`, which does not exist, so this should be
-    // reported as an unknown class. Instead it resolves to `X\Foo`
-    // through block A's import and nothing is reported.
-    function b(): void { (new Foo)->onlyX(); }
+    // `B\Foo` is unknown, but block A's import makes `Foo` look
+    // already imported, so no "import class" action is offered.
+    function b(Foo $f) {}
 }
 ```
 
-The parser collects a file's imports into a single use-map
-(`file_imports`), and the class loader that diagnostics and the type engine
-build (`Backend::class_loader`) reads it for every offset in the file, so an
-import is in force outside the block that declares it. The loader is also
-built for the file's *first* namespace, which `resolve_source_class_name`
-now corrects for classes the file itself declares, but a name that should
-fall through to the current block's namespace in another file still
-qualifies against the first block. Fixing it means making imports and the
-namespace per-block wherever a loader resolves a source name (the
-offset-aware `resolved_names` from mago-names already has the right answer
-for any identifier in the AST).
+Name resolution is per block (each `NamespaceSpan` carries its own
+`use_map`), but everything that *writes* imports still works on the
+file-wide `file_imports` table and `first_file_namespace`: the import-class
+and qualified-name-to-import code actions, the PHPStan `add_throws` /
+`add_override` / `remove_throws` fixes, and class rename/move rewriting
+(`rename/class/rewrite.rs`). They check for an existing import against every
+block's imports at once, and work out where a new one goes from the first
+block, so an edit in a later block is skipped because another block
+imports the name, or is placed against the wrong block. Fixing it means locating the target block by offset and
+reading, inserting into, and rewriting that block's own `use` statements.
+
+### B543. Unused-import detection pools the imports of every `namespace` block
+
+**Impact: Low · Complexity: Medium**
+
+```php
+namespace A {
+    use X\Foo;              // unused in A, but not reported
+}
+namespace B {
+    use X\Foo;
+    function b(Foo $f) {}
+}
+```
+
+`diagnostics/unused_imports.rs` checks declared imports against the merged
+file-wide import table, so an import used only in another block counts as
+used, and two blocks importing the same alias collapse into one entry.
+It needs to track each block's imports (and their source ranges) and match
+references against the block they are written in.
 
 ## Array types
 

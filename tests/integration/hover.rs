@@ -15936,3 +15936,69 @@ fn hover_on_docblock_only_tokens_does_not_pick_up_same_named_symbols() {
         on_param_var.as_ref().map(hover_text)
     );
 }
+
+/// Hovering a class name in one `namespace` block ignores an import that
+/// only a sibling block declares.
+#[test]
+fn hover_class_name_ignores_an_import_from_another_namespace_block() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let content = r#"<?php
+namespace X {
+    class Foo { public function fromX(): void {} }
+}
+namespace Y {
+    class Foo { public function fromY(): void {} }
+}
+namespace A {
+    use X\Foo;
+    function a(): void { new Foo(); }
+}
+namespace B {
+    use Y\Foo;
+    function b(): void { new Foo(); }
+}
+"#;
+
+    let hover_a =
+        crate::common::hover_at(&backend, uri, content, 9, 30).expect("hover on `Foo` in block A");
+    assert!(
+        crate::common::hover_text(&hover_a).contains("namespace X;"),
+        "block A imports `X\\Foo`, got: {}",
+        crate::common::hover_text(&hover_a)
+    );
+    let hover_b =
+        crate::common::hover_at(&backend, uri, content, 13, 30).expect("hover on `Foo` in block B");
+    assert!(
+        crate::common::hover_text(&hover_b).contains("namespace Y;"),
+        "block B imports `Y\\Foo`, got: {}",
+        crate::common::hover_text(&hover_b)
+    );
+}
+
+/// A name a block neither imports nor declares is its own namespace's
+/// class, not a same-named class another block imports.
+#[test]
+fn hover_class_name_not_imported_in_its_block_is_not_resolved_elsewhere() {
+    let backend = create_test_backend();
+    let uri = "file:///blocks.php";
+    let content = r#"<?php
+namespace X {
+    class Foo {}
+}
+namespace A {
+    use X\Foo;
+    function a(): void { new Foo(); }
+}
+namespace B {
+    function b(): void { new Foo(); }
+}
+"#;
+
+    let hover = crate::common::hover_at(&backend, uri, content, 9, 30);
+    let text = hover.as_ref().map(crate::common::hover_text).unwrap_or("");
+    assert!(
+        !text.contains("namespace X;"),
+        "`Foo` in block B is `B\\Foo`, got: {text}"
+    );
+}

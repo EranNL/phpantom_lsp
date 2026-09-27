@@ -816,7 +816,7 @@ impl Backend {
             ctx.all_classes,
             ctx.class_loader,
         );
-        let cls_arc = find_class_by_name(ctx.all_classes, class_name)
+        let cls_arc = crate::class_lookup::find_class_by_fqn(ctx.all_classes, &fqn)
             .map(Arc::clone)
             .or_else(|| (ctx.class_loader)(&fqn));
         let cls_arc = match cls_arc {

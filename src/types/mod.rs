@@ -173,6 +173,24 @@ pub struct NamespaceSpan {
     pub start: u32,
     /// Byte offset of the end of this namespace block (inclusive).
     pub end: u32,
+    /// The `use` imports declared inside this block.
+    ///
+    /// PHP scopes an import to the block that declares it, so a file with
+    /// several blocks needs one table per block.  Left empty when the file
+    /// has a single block, whose imports are the file-wide `file_imports`
+    /// table, so the common case stores them once.
+    pub use_map: HashMap<String, String>,
+}
+
+impl NamespaceSpan {
+    /// The block of `spans` that contains `offset`, or the last block for
+    /// an offset past every block (e.g. code after its closing brace).
+    pub fn containing(spans: &[NamespaceSpan], offset: u32) -> Option<&NamespaceSpan> {
+        spans
+            .iter()
+            .find(|span| offset >= span.start && offset <= span.end)
+            .or_else(|| spans.last())
+    }
 }
 
 /// Members extracted from a class-like body by `Backend::extract_class_like_members`.
@@ -2697,6 +2715,52 @@ pub(crate) struct FileContext {
     pub resolved_names: Option<Arc<crate::names::OwnedResolvedNames>>,
 }
 
+/// A class loader per `namespace` block of a file (see
+/// [`Backend::class_loaders`](crate::Backend::class_loaders)), as trait
+/// objects so it can be handed through non-generic walkers.
+pub type BlockClassLoaders<'a> = PerBlock<'a, &'a (dyn Fn(&str) -> Option<Arc<ClassInfo>> + 'a)>;
+
+/// One value per `namespace` block of a file, built by
+/// [`FileContext::per_block`].
+///
+/// PHP scopes both the namespace and the `use` imports to a block, so
+/// anything that resolves a source name (a class loader, above all) has to
+/// be the one built for the block the name is written in.
+pub struct PerBlock<'a, T> {
+    /// The file's blocks, or empty when it has only one.
+    spans: &'a [NamespaceSpan],
+    /// One entry per span, or a single entry when `spans` is empty.
+    items: Vec<T>,
+}
+
+impl<'a, T> PerBlock<'a, T> {
+    /// The value for the block containing `offset`.
+    pub fn at(&self, offset: u32) -> &T {
+        let index = self
+            .spans
+            .iter()
+            .position(|span| offset >= span.start && offset <= span.end)
+            // Past the last block (e.g. code after its closing brace).
+            .unwrap_or(self.items.len() - 1);
+        &self.items[index]
+    }
+
+    /// A value derived from each block's value.
+    pub fn map<'b, U>(&'b self, f: impl FnMut(&'b T) -> U) -> PerBlock<'a, U> {
+        PerBlock {
+            spans: self.spans,
+            items: self.items.iter().map(f).collect(),
+        }
+    }
+}
+
+impl<L: Fn(&str) -> Option<Arc<ClassInfo>>> PerBlock<'_, L> {
+    /// These loaders as trait objects.
+    pub fn as_dyn(&self) -> BlockClassLoaders<'_> {
+        self.map(|loader| loader as &dyn Fn(&str) -> Option<Arc<ClassInfo>>)
+    }
+}
+
 impl FileContext {
     /// The namespace in effect at `offset`.
     ///
@@ -2705,16 +2769,62 @@ impl FileContext {
     /// span contains `offset`, so a name written in the second block is
     /// not resolved against the first block's namespace.
     pub fn namespace_at(&self, offset: u32) -> &Option<String> {
-        let Some(spans) = self.namespace_spans.as_ref() else {
-            return &self.namespace;
-        };
-        for span in spans {
-            if offset >= span.start && offset <= span.end {
-                return &span.namespace;
-            }
+        self.span_at(offset)
+            .map_or(&self.namespace, |span| &span.namespace)
+    }
+
+    /// The `use` imports in force at `offset`.
+    ///
+    /// Equals [`use_map`](Self::use_map) for single-namespace files.  In a
+    /// file with several `namespace` blocks it is the table of the block
+    /// containing `offset`, so an import declared in one block does not
+    /// apply in another.
+    pub fn use_map_at(&self, offset: u32) -> &HashMap<String, String> {
+        self.span_at(offset)
+            .map_or(&self.use_map, |span| &span.use_map)
+    }
+
+    /// The namespace block containing `offset`, when the file has several.
+    fn span_at(&self, offset: u32) -> Option<&NamespaceSpan> {
+        NamespaceSpan::containing(self.namespace_spans.as_ref()?, offset)
+    }
+
+    /// Build one `T` per `namespace` block from that block's imports and
+    /// namespace, for a consumer that resolves names all over the file.
+    ///
+    /// A single-namespace file builds one value from the file-wide
+    /// [`use_map`](Self::use_map) and [`namespace`](Self::namespace).
+    /// Look a value up with [`PerBlock::at`].
+    pub fn per_block<'a, T>(
+        &'a self,
+        mut build: impl FnMut(&'a HashMap<String, String>, &'a Option<String>) -> T,
+    ) -> PerBlock<'a, T> {
+        match self.namespace_spans.as_deref() {
+            Some(spans) => PerBlock {
+                spans,
+                items: spans
+                    .iter()
+                    .map(|span| build(&span.use_map, &span.namespace))
+                    .collect(),
+            },
+            None => PerBlock {
+                spans: &[],
+                items: vec![build(&self.use_map, &self.namespace)],
+            },
         }
-        // Past the last block (e.g. code after its closing brace).
-        spans.last().map_or(&self.namespace, |s| &s.namespace)
+    }
+
+    /// This context narrowed to the namespace block containing `offset`:
+    /// that block's namespace and imports, for a consumer that resolves
+    /// every name it sees against one block.
+    pub fn at(&self, offset: u32) -> FileContext {
+        FileContext {
+            classes: self.classes.clone(),
+            use_map: self.use_map_at(offset).clone(),
+            namespace: self.namespace_at(offset).clone(),
+            namespace_spans: self.namespace_spans.clone(),
+            resolved_names: self.resolved_names.clone(),
+        }
     }
 
     /// Resolve a name to its FQN using the best available data source.
@@ -2738,21 +2848,23 @@ impl FileContext {
         }
         // Fallback: replicate resolve_to_fqn logic inline to avoid
         // a cross-module dependency on diagnostics::helpers.
+        let use_map = self.use_map_at(offset);
+        let namespace = self.namespace_at(offset);
         if !name.contains('\\') {
-            if let Some(fqn) = self.use_map.get(name) {
+            if let Some(fqn) = use_map.get(name) {
                 return fqn.clone();
             }
-            if let Some(ref ns) = self.namespace {
+            if let Some(ns) = namespace {
                 return format!("{}\\{}", ns, name);
             }
             return name.to_string();
         }
         let first_segment = name.split('\\').next().unwrap_or(name);
-        if let Some(fqn_prefix) = self.use_map.get(first_segment) {
+        if let Some(fqn_prefix) = use_map.get(first_segment) {
             let rest = &name[first_segment.len()..];
             return format!("{}{}", fqn_prefix, rest);
         }
-        if let Some(ref ns) = self.namespace {
+        if let Some(ns) = namespace {
             return format!("{}\\{}", ns, name);
         }
         name.to_string()

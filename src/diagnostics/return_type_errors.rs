@@ -11,6 +11,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use mago_span::HasSpan;
 use mago_syntax::cst::expression::Expression;
 use mago_syntax::cst::statement::Statement;
 
@@ -177,14 +178,16 @@ impl Backend {
                 with_parsed_program(content, "return_type_diagnostics", |program, _content| {
                     let mut resolved_returns: Vec<ResolvedReturn> = Vec::new();
                     for stmt in program.statements.iter() {
+                        // A top-level statement lies in one `namespace` block.
+                        let offset = stmt.span().start.offset;
                         process_top_level_statement(
                             stmt,
                             uri,
                             content,
                             ctx.file_ctx,
-                            ctx.class_loader,
-                            ctx.function_loader,
-                            ctx.constant_loader,
+                            ctx.class_loader_at(offset),
+                            ctx.function_loader_at(offset),
+                            ctx.constant_loader_at(offset),
                             self,
                             &mut resolved_returns,
                         );
@@ -210,7 +213,7 @@ impl Backend {
                         if is_type_compatible(
                             ty,
                             &ret.declared_type,
-                            &ctx.class_loader,
+                            ctx.class_loader_at(ret.start as u32),
                             ctx.strict_types,
                         ) =>
                     {

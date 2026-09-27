@@ -316,14 +316,13 @@ fn read_out_type(
     let content = backend.get_file_content_arc(uri)?;
     let file_ctx = backend.file_context(uri);
     // A file may declare several `namespace` blocks; the callee's names
-    // resolve against the one its declaration sits in.
+    // resolve against the namespace and imports of the one its declaration
+    // sits in.
     let namespace = file_ctx.namespace_at(name_offset);
-    let class_loader = backend.class_loader_with(&file_ctx.classes, &file_ctx.use_map, namespace);
-    let function_loader = backend.function_loader_with(
-        file_ctx.resolved_names.as_deref(),
-        &file_ctx.use_map,
-        namespace,
-    );
+    let use_map = file_ctx.use_map_at(name_offset);
+    let class_loader = backend.class_loader_with(&file_ctx.classes, use_map, namespace);
+    let function_loader =
+        backend.function_loader_with(file_ctx.resolved_names.as_deref(), use_map, namespace);
 
     // The scope cache and the chain cache both key on offsets alone, and
     // the offsets below belong to another file. Neither may answer, nor

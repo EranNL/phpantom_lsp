@@ -799,36 +799,28 @@ impl Backend {
         // Parse classes with per-class namespace tracking so that
         // multi-namespace files (e.g. PDO.php with both `namespace { }`
         // and `namespace Pdo { }`) resolve parent names correctly.
-        let classes_with_ns = Self::parse_php_versioned_with_namespaces(content, php_version);
+        let (mut classes_with_ns, blocks) = Self::parse_php_classes_by_block(content, php_version);
 
-        // Group classes by their enclosing namespace and resolve parent
-        // names once per group, mirroring the logic in `update_ast_inner`.
+        // Resolve parent names against each class's own namespace block
+        // (namespace and imports), mirroring the logic in `update_ast_inner`,
+        // so that classes in `namespace { }` are not polluted by a sibling
+        // `namespace Pdo { }` block.
+        Self::resolve_parent_class_names_by_block(
+            &mut classes_with_ns,
+            &blocks,
+            &file_use_map,
+            &file_namespace,
+        );
+        let single_namespace = {
+            let mut namespaces = classes_with_ns.iter().map(|(_, ns, _)| ns);
+            let first = namespaces.next();
+            namespaces.all(|ns| Some(ns) == first)
+        };
         let mut classes: Vec<ClassInfo> = Vec::with_capacity(classes_with_ns.len());
-        let mut ns_groups: HashMap<Option<String>, Vec<usize>> = HashMap::new();
-        for (i, (_cls, ns)) in classes_with_ns.iter().enumerate() {
-            ns_groups.entry(ns.clone()).or_default().push(i);
-        }
-
-        // Flatten into a single Vec, preserving original order.
-        for (cls, _) in &classes_with_ns {
-            classes.push(cls.clone());
-        }
-
-        if ns_groups.len() <= 1 {
-            // Single namespace (common case): resolve with file namespace.
-            Self::resolve_parent_class_names(&mut classes, &file_use_map, &file_namespace);
-        } else {
-            // Multi-namespace file: resolve each group with its own
-            // namespace context so that classes in `namespace { }` are
-            // not polluted by a sibling `namespace Pdo { }` block.
-            for (group_ns, indices) in &ns_groups {
-                let mut group: Vec<ClassInfo> =
-                    indices.iter().map(|&i| classes[i].clone()).collect();
-                Self::resolve_parent_class_names(&mut group, &file_use_map, group_ns);
-                for (j, &idx) in indices.iter().enumerate() {
-                    classes[idx] = group[j].clone();
-                }
-            }
+        let mut class_namespaces: Vec<Option<String>> = Vec::with_capacity(classes_with_ns.len());
+        for (cls, ns, _) in classes_with_ns {
+            classes.push(cls);
+            class_namespaces.push(ns);
         }
 
         // Set the per-class file_namespace so that classes loaded via
@@ -843,10 +835,9 @@ impl Backend {
         // the file-level namespace would label it `Pdo\PDO`.  The fallback is
         // only meaningful for single-namespace files, where a missing
         // per-class value means the namespace simply was not tracked.
-        let single_namespace = ns_groups.len() <= 1;
         for (i, cls) in classes.iter_mut().enumerate() {
             if cls.file_namespace.is_none() {
-                let class_ns = classes_with_ns[i].1.as_deref();
+                let class_ns = class_namespaces[i].as_deref();
                 cls.file_namespace = if single_namespace {
                     class_ns.or(file_namespace.as_deref())
                 } else {
@@ -1266,9 +1257,10 @@ impl Backend {
             if let Some(fqn) = file_use_map.get(name) {
                 return self.find_or_load_class(fqn);
             }
-            // Check local classes (same-file shortcut).
-            // In multi-namespace files, prefer the class whose
-            // file_namespace matches the current namespace context.
+            // Check local classes (same-file shortcut).  Only a class in
+            // the current namespace: in a file with several `namespace`
+            // blocks, a same-named class of another block is a different
+            // class.
             let lookup = short_name(name);
             let ns_matches = |c: &ClassInfo| match (&c.file_namespace, file_namespace) {
                 (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
@@ -1277,12 +1269,7 @@ impl Backend {
             };
             let local_match = local_classes
                 .iter()
-                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c))
-                .or_else(|| {
-                    local_classes
-                        .iter()
-                        .find(|c| c.name.eq_ignore_ascii_case(lookup))
-                });
+                .find(|c| c.name.eq_ignore_ascii_case(lookup) && ns_matches(c));
             if let Some(cls) = local_match {
                 return Some(Arc::clone(cls));
             }
@@ -1445,6 +1432,20 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a {
         self.class_loader_with(&ctx.classes, &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one class-loader closure per `namespace` block of the file
+    /// behind `ctx`, for a consumer that resolves names across the whole
+    /// file rather than at one position.
+    ///
+    /// Each block's loader resolves source names against that block's own
+    /// imports and namespace; pick the one for a name with
+    /// [`PerBlock::at`](crate::types::PerBlock::at) at the name's offset.
+    pub(crate) fn class_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str) -> Option<Arc<ClassInfo>> + 'a> {
+        ctx.per_block(|use_map, namespace| self.class_loader_with(&ctx.classes, use_map, namespace))
     }
 
     /// Return a class-loader closure from individual file-context
@@ -1610,6 +1611,17 @@ impl Backend {
         ctx: &'a FileContext,
     ) -> impl Fn(&str, u32) -> Option<FunctionInfo> + 'a {
         self.function_loader_with(ctx.resolved_names.as_deref(), &ctx.use_map, &ctx.namespace)
+    }
+
+    /// Return one function-loader closure per `namespace` block of the
+    /// file behind `ctx`; see [`class_loaders`](Self::class_loaders).
+    pub(crate) fn function_loaders<'a>(
+        &'a self,
+        ctx: &'a FileContext,
+    ) -> crate::types::PerBlock<'a, impl Fn(&str, u32) -> Option<FunctionInfo> + 'a> {
+        ctx.per_block(|use_map, namespace| {
+            self.function_loader_with(ctx.resolved_names.as_deref(), use_map, namespace)
+        })
     }
 
     /// Return a function-loader closure from individual file-context

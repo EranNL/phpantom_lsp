@@ -108,7 +108,7 @@ impl Backend {
             }
             SymbolKind::ClassDeclaration { name } => {
                 let ctx = self.file_context(uri);
-                Some(build_fqn(name, ctx.namespace.as_deref()))
+                Some(build_fqn(name, ctx.namespace_at(offset).as_deref()))
             }
             _ => None,
         }

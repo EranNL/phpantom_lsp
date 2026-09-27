@@ -106,7 +106,7 @@ impl Backend {
         let uri = &data.uri;
         let cursor_offset = crate::text_position::position_to_offset(content, data.range.start);
 
-        let file_ctx = self.file_context(uri);
+        let file_ctx = self.file_context_at(uri, cursor_offset);
 
         let current_class = find_class_at_offset(&file_ctx.classes, cursor_offset)?;
 
