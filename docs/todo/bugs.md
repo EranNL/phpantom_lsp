@@ -109,117 +109,36 @@ No outstanding items.
 
 ## Templates
 
-### B525. A constructor's default argument does not bind a class template
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @template T of object */
-class E {
-    /** @param class-string<T> $t */
-    function __construct(string $t = D::class) { … }
-}
-$e = new E();
-// E<object>, should be E<D>
-```
-
-An omitted argument takes the parameter's default, so the default binds
-the template the same way a passed argument would.
-
-Found porting Psalm's `Template/ClassTemplateTest.php`
-(`templateDefaultClassConstant`).
-
-### B526. `@var T` on a promoted constructor property does not bind the class template
-
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-/** @template T */
-class A {
-    public function __construct(
-        /** @var T */
-        public mixed $t
-    ) {}
-}
-$a = new A(5);
-// A<mixed>, should be A<int>; $a->t is mixed, should be int
-```
-
-A promoted parameter's `@var` is its parameter type as well as its
-property type, so it binds `T` from the argument just as `@param T $t`
-does.
-
-Found porting Psalm's `Template/ClassTemplateTest.php` (`promoted property
-with template`).
-
-### B527. A method returning `T|E` reads an offset from only one of the two bound shapes
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @template T */
-class Option {
-    /** @param T $v */
-    public function __construct(private $v) {}
-    /**
-     * @template E
-     * @param E $else
-     * @return T|E
-     */
-    public function getOrElse($else) { … }
-}
-$b = (new Option([1, 3]))->getOrElse([2, 4])[0];
-// 2, should be 1|2
-```
-
-Found porting Psalm's `Template/ClassTemplateTest.php`
-(`combineTwoTemplatedArrays`).
-
-### B528. A conditional return type nested in a generic argument is not resolved
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/**
- * @template TMappedValue
- * @param (Closure(TValue): TMappedValue)|true $callback
- * @return list<$callback is true ? array : TMappedValue>
- */
-public function toArray1(Closure|true $callback): array { … }
-
-$a = (new a)->toArray1(static fn ($obj) => $obj->key);
-// list<array|inner>, should be list<inner>
-```
-
-A conditional written as the whole return type is decided against the
-call's arguments; one written inside `list<…>` keeps both branches.
-
-Found porting Psalm's `ClosureTest.php` (`templateShenanigans`).
-
-### B529. A template bounded by a `Closure(…)` signature does not bind the closure's return type
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/**
- * @template TMappedValue
- * @template T as (Closure(TValue): TMappedValue)
- * @param T $callback
- * @return list<TMappedValue>
- */
-public function toArray2(Closure $callback): array { … }
-
-$b = (new a)->toArray2(static fn ($obj) => $obj->key);
-// list<mixed>, should be list<inner>
-```
-
-Written as `@param (Closure(TValue): TMappedValue) $callback` the same
-call binds `TMappedValue`; routed through another template's bound it
-does not.
-
-Found porting Psalm's `ClosureTest.php` (`templateShenanigans`).
+No outstanding items.
 
 ## Miscellaneous
+
+### B537. A spread of an array filled through a dynamic key makes the call `never`
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$floats = ['a' => [], 'b' => []];
+foreach (['a' => $x, 'b' => $y] as $key => $types) {
+    foreach ($types as $type) {
+        $floats[$key][] = $type;
+    }
+}
+if (count($floats['a']) === 0) { … } elseif (count($floats['b']) === 0) { … }
+$aTypes = TypeCombinator::union(...$floats['a']);
+$aTypes->equals($b);
+// Cannot access method 'equals' on type 'never'
+```
+
+Two things seem to go wrong here (not yet confirmed in isolation).
+`$floats[$key][] = …` with a non-literal key probably leaves
+`$floats['a']` as `array{}`. And spreading an empty array passes no
+arguments, which is a perfectly reachable call. It should not count as an
+argument that can never be reached, so it should not make the call `never`.
+
+Found in phpstan-src's `MutatingScope.php` (the only diagnostic
+`analyze` reports on it). It is already there at HEAD, before the
+template fixes.
 
 ### B530. A constant whose initializer uses another constant has no type
 

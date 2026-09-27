@@ -86,5 +86,5 @@ pub(crate) use template_subs::{
     array_literal_element_type, array_literal_shape_type, array_literal_shape_type_with,
     bind_callable_param_template, bind_callable_return_template, build_call_template_subs,
     callable_bindings_last, evaluate_constant_operands, finish_template_subs,
-    generalize_object_template_arg, type_operator_bound_literal,
+    generalize_object_template_arg, hint_through_template_bound, type_operator_bound_literal,
 };

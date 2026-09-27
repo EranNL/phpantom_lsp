@@ -70,6 +70,7 @@ pub use tags::{
 pub(crate) use tags::{
     find_var_tag, is_compatible_refinement_typed, merge_param_docblock_into_parameters,
 };
+pub(crate) use templates::collect_template_bindings;
 
 // Template / generics / type alias tags
 pub use templates::{

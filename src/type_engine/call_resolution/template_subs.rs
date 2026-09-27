@@ -125,10 +125,14 @@ impl Backend {
             // Classify how the template param appears in the parameter's
             // type hint (direct, array element, generic wrapper, or
             // callable return type).
-            let param_hint = method
-                .parameters
-                .get(param_idx)
-                .and_then(|p| p.type_hint.as_ref());
+            let param_hint = hint_through_template_bound(
+                tpl_name,
+                method
+                    .parameters
+                    .get(param_idx)
+                    .and_then(|p| p.type_hint.as_ref()),
+                &method.template_param_bounds,
+            );
             let binding_mode = classify_template_binding(tpl_name, param_hint);
 
             let tpl_bound = method.template_param_bounds.get(&atom(tpl_name));
@@ -2049,6 +2053,28 @@ pub(crate) fn callable_bindings_last<'a>(
         .iter()
         .filter(move |b| !is_callable(b))
         .chain(bindings.iter().filter(is_callable))
+}
+
+/// The hint a template binds against when its parameter is declared as
+/// another template whose callable bound names it: for `@param T $callback`
+/// with `@template T of Closure(A): B`, `B` binds against `Closure(A): B`.
+///
+/// Any other hint is returned unchanged.
+pub(crate) fn hint_through_template_bound<'a>(
+    tpl_name: &str,
+    param_hint: Option<&'a PhpType>,
+    bounds: &'a crate::atom::AtomMap<PhpType>,
+) -> Option<&'a PhpType> {
+    if let Some(hint) = param_hint
+        && let TypeKind::Named(name) = hint.kind()
+        && name.as_str() != tpl_name
+        && let Some(bound) = bounds.get(name)
+        && bound.callable_param_types().is_some()
+        && crate::type_engine::variable::rhs_resolution::type_contains_name(bound, tpl_name)
+    {
+        return Some(bound);
+    }
+    param_hint
 }
 
 /// Bind a template parameter that a `@param Closure(T): void` hint names in

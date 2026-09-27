@@ -281,10 +281,14 @@ pub(crate) fn build_function_template_subs(
         // Determine the binding mode by inspecting the parameter's
         // docblock type hint.  The type hint tells us how the template
         // param is embedded in the `@param` annotation.
-        let param_hint = func_info
-            .parameters
-            .get(param_idx)
-            .and_then(|p| p.type_hint.as_ref());
+        let param_hint = crate::type_engine::call_resolution::hint_through_template_bound(
+            tpl_name,
+            func_info
+                .parameters
+                .get(param_idx)
+                .and_then(|p| p.type_hint.as_ref()),
+            &func_info.template_param_bounds,
+        );
         let binding_mode = classify_template_binding(tpl_name, param_hint);
 
         // Fall back to the parameter's default value only for binding

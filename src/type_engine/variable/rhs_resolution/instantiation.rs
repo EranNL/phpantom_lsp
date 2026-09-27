@@ -149,14 +149,23 @@ pub(super) fn resolve_rhs_instantiation(
             };
             if let Some(ctor) = ctor_ref
                 && !ctor.template_bindings.is_empty()
-                && let Some(ref arg_list) = inst.argument_list
             {
-                let arg_texts =
-                    crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
-                        arg_list,
-                        ctx.content,
-                    );
-                if !arg_texts.is_empty() {
+                // `new E` and `new E()` still bind: an omitted argument
+                // takes the parameter's default, which binds the template
+                // the way a passed argument would.
+                let arg_texts = inst
+                    .argument_list
+                    .as_ref()
+                    .map(|arg_list| {
+                        crate::type_engine::variable::raw_type_inference::extract_arg_texts_from_ast(
+                            arg_list,
+                            ctx.content,
+                        )
+                    })
+                    .unwrap_or_default();
+                if !arg_texts.is_empty()
+                    || ctor.parameters.iter().any(|p| p.default_value.is_some())
+                {
                     let rctx = ctx.as_resolution_ctx();
                     let raw_subs =
                         build_constructor_template_subs(ctor_owner, ctor, &arg_texts, &rctx, ctx);
@@ -703,9 +712,21 @@ pub(super) fn build_constructor_template_subs(
                 let literal = bare_template
                     .then(|| crate::type_engine::call_resolution::literal_arg_type(arg_text.trim()))
                     .flatten();
-                if let Some(resolved_type) =
-                    literal.or_else(|| Backend::resolve_arg_text_to_type(arg_text, rctx))
-                {
+                // `resolve_arg_text_to_type` collapses a `[...]` literal to
+                // the bare `array` keyword; a bare template binds the
+                // literal's own shape instead, as a method template does.
+                let resolved = literal.or_else(|| {
+                    let ty = Backend::resolve_arg_text_to_type(arg_text, rctx)?;
+                    if bare_template && ty.is_bare_array() {
+                        crate::type_engine::call_resolution::array_literal_shape_type(
+                            arg_text, rctx,
+                        )
+                        .or(Some(ty))
+                    } else {
+                        Some(ty)
+                    }
+                });
+                if let Some(resolved_type) = resolved {
                     insert_or_union(&mut subs, tpl_name.to_string(), resolved_type);
                 }
             }

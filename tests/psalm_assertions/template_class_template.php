@@ -845,7 +845,7 @@ namespace PsalmTest_template_class_template_27 {
 
     $e = new E();
 
-    assertType('E<D>', $e); // SKIP: a constructor's default argument does not bind a class template
+    assertType('E<D>', $e);
 }
 
 // Test: combineTwoTemplatedArrays
@@ -871,7 +871,7 @@ namespace PsalmTest_template_class_template_28 {
 
     $b = $opt->getOrElse([2, 4])[0];
 
-    assertType('1|2', $b); // SKIP: a method returning `T|E` reads an offset from only one of the two bound shapes
+    assertType('1|2', $b);
 }
 
 // Test: complexTypes
@@ -924,8 +924,8 @@ namespace PsalmTest_template_class_template_30 {
     $a = new A(5);
     $t = $a->t;
 
-    assertType('A<int>', $a); // SKIP: `@var T` on a promoted constructor property does not bind the class template
-    assertType('int', $t); // SKIP: `@var T` on a promoted constructor property does not bind the class template
+    assertType('A<int>', $a);
+    assertType('int', $t);
 }
 
 // Test: template of simple type with additional comment without dot

@@ -745,8 +745,10 @@ enum ArgForm {
     False,
     Null,
     ArrayLit,
+    /// A closure or arrow function literal, which is always a `Closure`.
+    Closure,
     /// Any expression whose type cannot be read from its syntax alone
-    /// (variables, property/method chains, function calls, closures, …).
+    /// (variables, property/method chains, function calls, …).
     Unknown,
 }
 
@@ -777,7 +779,25 @@ fn classify_arg_form(arg: &str) -> ArgForm {
     if t.starts_with('[') || t.to_ascii_lowercase().starts_with("array(") {
         return ArgForm::ArrayLit;
     }
+    if is_closure_literal(t) {
+        return ArgForm::Closure;
+    }
     ArgForm::Unknown
+}
+
+/// Whether `t` is written as `function (…) …` or `fn (…) => …`, optionally
+/// `static` and by-reference.
+fn is_closure_literal(t: &str) -> bool {
+    let starts_with_keyword = |text: &str, keyword: &str| {
+        text.get(..keyword.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(keyword))
+            && text[keyword.len()..].trim_start().starts_with(['(', '&'])
+    };
+    let t = match t.get(..6) {
+        Some(head) if head.eq_ignore_ascii_case("static") => t[6..].trim_start(),
+        _ => t,
+    };
+    starts_with_keyword(t, "fn") || starts_with_keyword(t, "function")
 }
 
 /// The literal value an argument's source text denotes, when the text is a
@@ -875,6 +895,7 @@ fn form_category(arg_text: &str) -> Option<&'static str> {
         ArgForm::True | ArgForm::False => Some("bool"),
         ArgForm::Null => Some("null"),
         ArgForm::ArrayLit => Some("array"),
+        ArgForm::Closure => Some("object"),
         ArgForm::Unknown => None,
     }
 }
@@ -895,6 +916,7 @@ fn condition_result_from_form(condition: &PhpType, form: ArgForm) -> Option<bool
                 .iter()
                 .map(|member| condition_result_from_form(member, form)),
         ),
+        _ if form == ArgForm::Closure => closure_matches_condition(condition),
         _ => Some(scalar_condition_matches_form(condition, form)),
     }
 }
@@ -937,7 +959,26 @@ fn scalar_condition_matches_form(condition: &PhpType, form: ArgForm) -> bool {
         ArgForm::False => condition.is_bool() || condition.is_false(),
         ArgForm::Null => condition.is_null(),
         ArgForm::ArrayLit => condition.is_array_like(),
-        ArgForm::Unknown => false,
+        ArgForm::Closure | ArgForm::Unknown => false,
+    }
+}
+
+/// Whether a closure literal satisfies a single (non-union) type condition.
+///
+/// A class condition other than `Closure` itself stays undecided, and so
+/// does a callable signature, which the literal's own signature would have
+/// to be checked against.
+fn closure_matches_condition(condition: &PhpType) -> Option<bool> {
+    if condition.is_mixed()
+        || condition.is_object()
+        || (condition.is_callable() && !matches!(condition.kind(), TypeKind::Callable(_)))
+    {
+        Some(true)
+    } else if condition.is_true() || condition.is_false() || condition_category(condition).is_some()
+    {
+        Some(false)
+    } else {
+        None
     }
 }
 

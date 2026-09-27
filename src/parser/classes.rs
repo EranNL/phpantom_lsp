@@ -911,10 +911,10 @@ impl Backend {
                         conditional_return,
                         deprecation_message,
                         method_deprecated_replacement,
-                        method_template_params,
+                        mut method_template_params,
                         method_template_param_bounds,
                         method_template_param_defaults,
-                        method_template_bindings,
+                        mut method_template_bindings,
                     ) = if let Some(ref info) = method_docblock_info {
                         let parsed_doc_type = docblock::extract_return_type_from_info(info);
                         let effective = if return_from_lang_level {
@@ -1130,6 +1130,46 @@ impl Backend {
                                     }
                                     None
                                 });
+
+                                // A promoted parameter's `@var` types the
+                                // parameter as well as the property, unless
+                                // the constructor's own `@param` says otherwise,
+                                // so it binds class templates from the argument
+                                // just as `@param T $t` would.
+                                if let Some(ref var_type) = inline_var_type
+                                    && method_docblock_info.as_ref().is_none_or(|info| {
+                                        docblock::extract_param_raw_type_from_info(info, &raw_name)
+                                            .is_none()
+                                    })
+                                {
+                                    if let Some(p) =
+                                        parameters.iter_mut().find(|p| p.name == raw_name.as_str())
+                                    {
+                                        p.type_hint = type_hint.clone();
+                                    }
+                                    if !class_template_params.is_empty() {
+                                        let class_tpl_strs: Vec<String> = class_template_params
+                                            .iter()
+                                            .map(|a| a.to_string())
+                                            .collect();
+                                        let mut found = Vec::new();
+                                        docblock::collect_template_bindings(
+                                            var_type,
+                                            &class_tpl_strs,
+                                            &raw_name,
+                                            &mut found,
+                                        );
+                                        if !found.is_empty() && method_template_params.is_empty() {
+                                            method_template_params = class_template_params.to_vec();
+                                        }
+                                        for (tpl, param_name) in found {
+                                            let binding = (atom(&tpl), atom(&param_name));
+                                            if !method_template_bindings.contains(&binding) {
+                                                method_template_bindings.push(binding);
+                                            }
+                                        }
+                                    }
+                                }
 
                                 let prop_name_offset = param.variable.span.start.offset;
                                 properties.push(PropertyInfo {

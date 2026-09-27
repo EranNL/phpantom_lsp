@@ -221,8 +221,8 @@ namespace PsalmTest_closure_10 {
 
     $c = (new a)->toArray3(static fn ($obj) => $obj->key);
 
-    assertType('list<inner>', $a); // SKIP: a conditional return type nested in a generic argument is not resolved against the argument
-    assertType('list<inner>', $b); // SKIP: a template bounded by a `Closure(…)` signature does not bind the closure's return type
+    assertType('list<inner>', $a);
+    assertType('list<inner>', $b);
     assertType('list<inner>', $c);
 }
 
