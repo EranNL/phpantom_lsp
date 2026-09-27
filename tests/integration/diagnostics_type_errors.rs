@@ -12866,3 +12866,32 @@ function probe(array $lookup): bool {
     let diags = collect_with_full_stubs(php);
     assert!(!has_type_error(&diags), "{diags:#?}");
 }
+
+/// An override's narrower native return type wins over an interface method
+/// declared `: ?self` that reaches the class through an ancestor: binding
+/// that `self` to the interface must not make the inherited `?Node` look
+/// like a docblock type richer than the override's own `?Owner`.
+#[test]
+fn override_return_type_beats_an_inherited_interface_self() {
+    let php = r#"<?php
+interface Node { public function getParent(): ?self; }
+interface Artifact extends Node {}
+abstract class AbstractArtifact implements Artifact {
+    public function getParent(): ?Node { return null; }
+}
+abstract class AbstractCallable extends AbstractArtifact {}
+class Owner extends AbstractArtifact {}
+class Method extends AbstractCallable {
+    public function getParent(): ?Owner { return null; }
+}
+function takes_owner(Owner $o): void {}
+function probe(Method $m): void {
+    $parent = $m->getParent();
+    if ($parent) {
+        takes_owner($parent);
+    }
+}
+"#;
+    let diags = collect_slow(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+}

@@ -98,7 +98,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B510. An overriding method's narrower return type is lost on some call sites
-**Impact: Medium · Complexity: Unknown**
-
-In pdepend, `ASTMethod::getParent(): ?AbstractASTClassOrInterface` overrides `AbstractASTArtifact::getParent(): ?ASTNode`, yet `$method->getParent()` resolves to the parent's `?ASTNode` at eight call sites (`ClassDependencyAnalyzer.php`, `CodeRankAnalyzer/MethodStrategy.php`, `CouplingAnalyzer.php`, `ASTParameter.php`), plus one in phpmd (`Rule/CleanCode/UndefinedVariable.php`). These all came back in the 2026-09-27 sweep and are present at `063275b0`, so one of that day's earlier commits introduced them. A reduced three-level hierarchy with the same shape resolves correctly, so the trigger has not been isolated yet; bisecting the day's commits against `analyze` on pdepend is the quickest way in.
+No outstanding items.

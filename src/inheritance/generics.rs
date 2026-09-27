@@ -117,18 +117,19 @@ pub(crate) fn bind_inherited_class_keywords(
     let Some(declaring_parent) = declaring_parent else {
         return;
     };
-    if let Some(ref mut ret) = method.return_type
-        && ret.contains_bare_parent()
-    {
-        *ret = ret.replace_bare_parent(declaring_parent);
-    }
+    let bind = |ty: &mut Option<PhpType>| {
+        if let Some(t) = ty
+            && t.contains_bare_parent()
+        {
+            *t = t.replace_bare_parent(declaring_parent);
+        }
+    };
+    bind(&mut method.return_type);
+    bind(&mut method.native_return_type);
     if method_has_bare_parent(method) {
         for param in method.parameters.make_mut() {
-            if let Some(ref mut hint) = param.type_hint
-                && hint.contains_bare_parent()
-            {
-                *hint = hint.replace_bare_parent(declaring_parent);
-            }
+            bind(&mut param.type_hint);
+            bind(&mut param.native_type_hint);
         }
     }
 }
@@ -153,16 +154,18 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
     class_name: &str,
     declaring_parent: Option<&str>,
 ) {
-    let Some(ref mut hint) = property.type_hint else {
-        return;
-    };
-    if hint.contains_bare_self() {
-        *hint = hint.replace_bare_self(class_name);
-    }
-    if let Some(declaring_parent) = declaring_parent
-        && hint.contains_bare_parent()
-    {
-        *hint = hint.replace_bare_parent(declaring_parent);
+    for ty in [&mut property.type_hint, &mut property.native_type_hint] {
+        let Some(hint) = ty else {
+            continue;
+        };
+        if hint.contains_bare_self() {
+            *hint = hint.replace_bare_self(class_name);
+        }
+        if let Some(declaring_parent) = declaring_parent
+            && hint.contains_bare_parent()
+        {
+            *hint = hint.replace_bare_parent(declaring_parent);
+        }
     }
 }
 
@@ -173,23 +176,30 @@ pub(crate) fn bind_inherited_class_keywords_in_property(
 /// or trait-imported method must carry the declaring class rather than
 /// the literal keyword. `static` is deliberately left alone: it binds
 /// late, to the class the call is made on.
+///
+/// The native hints are bound alongside the effective ones. Enrichment
+/// reads an effective type that differs from its native hint as a
+/// docblock override, so binding only one side would make the bound copy
+/// look richer than it is and let it overwrite an override's narrower
+/// native return type.
 pub(crate) fn replace_bare_self_in_method(method: &mut MethodInfo, class_name: &str) {
-    if let Some(ref mut ret) = method.return_type
-        && ret.contains_bare_self()
-    {
-        *ret = ret.replace_bare_self(class_name);
-    }
+    let bind = |ty: &mut Option<PhpType>| {
+        if let Some(t) = ty
+            && t.contains_bare_self()
+        {
+            *t = t.replace_bare_self(class_name);
+        }
+    };
+    bind(&mut method.return_type);
+    bind(&mut method.native_return_type);
     let any_param = method
         .parameters
         .iter()
         .any(|p| p.type_hint.as_ref().is_some_and(|h| h.contains_bare_self()));
     if any_param {
         for param in method.parameters.make_mut() {
-            if let Some(ref mut hint) = param.type_hint
-                && hint.contains_bare_self()
-            {
-                *hint = hint.replace_bare_self(class_name);
-            }
+            bind(&mut param.type_hint);
+            bind(&mut param.native_type_hint);
         }
     }
 }
