@@ -227,19 +227,19 @@ class CountWithOptionalKeys
 		}
 
 		if (count($row) === 1) {
-			assertType('array{mixed}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed}', $row);
 		} else {
-			assertType('array{mixed, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed, string|null}', $row);
 		}
 
 		if (count($row) === 2) {
-			assertType('array{mixed, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed, string|null}', $row);
 		} else {
-			assertType('array{mixed}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed}', $row);
 		}
 
 		if (count($row) === 3) {
-			assertType('*NEVER*', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('*NEVER*', $row);
 		} else {
 			assertType('array{0: mixed, 1?: string|null}', $row);
 		}
@@ -253,25 +253,25 @@ class CountWithOptionalKeys
 		if (count($row) === 0) {
 			assertType('*NEVER*', $row);
 		} else {
-			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: a union of shapes is not folded when one alternative covers another
 		}
 
 		if (count($row) === 1) {
-			assertType('array{mixed}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed}', $row);
 		} else {
-			assertType('array{mixed, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed, string|null}', $row);
 		}
 
 		if (count($row) === 2) {
-			assertType('array{mixed, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed, string|null}', $row);
 		} else {
-			assertType('array{mixed}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{mixed}', $row);
 		}
 
 		if (count($row) === 3) {
-			assertType('*NEVER*', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('*NEVER*', $row);
 		} else {
-			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{0: mixed, 1?: string|null}', $row); // SKIP: a union of shapes is not folded when one alternative covers another
 		}
 	}
 
@@ -287,19 +287,19 @@ class CountWithOptionalKeys
 		}
 
 		if (count($row) === 1) {
-			assertType('array{0: int, 1?: string|null}|array{string}', $row);
+			assertType('array{int}|array{string}', $row); // PHPStan keeps the optional entry, which the count proves absent
 		} else {
-			assertType('array{int, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{int, string|null}', $row);
 		}
 
 		if (count($row) === 2) {
-			assertType('array{int, string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{int, string|null}', $row);
 		} else {
-			assertType('array{0: int, 1?: string|null}|array{string}', $row);
+			assertType('array{int}|array{string}', $row); // PHPStan keeps the optional entry, which the count proves absent
 		}
 
 		if (count($row) === 3) {
-			assertType('*NEVER*', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('*NEVER*', $row);
 		} else {
 			assertType('array{0: int, 1?: string|null}|array{string}', $row);
 		}
@@ -317,19 +317,19 @@ class CountWithOptionalKeys
 		}
 
 		if (count($row) === 1) {
-			assertType('array{0: int, 3?: string|null}|array{string}', $row);
+			assertType('array{int}|array{string}', $row); // PHPStan keeps the optional entry, which the count proves absent
 		} else {
-			assertType('array{0: int, 3?: string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{0: int, 3: string|null}', $row); // PHPStan keeps the `3?`, but the count proves the entry present
 		}
 
 		if (count($row) === 2) {
-			assertType('array{0: int, 3?: string|null}', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('array{0: int, 3: string|null}', $row); // PHPStan keeps the `3?`, but the count proves the entry present
 		} else {
-			assertType('array{0: int, 3?: string|null}|array{string}', $row);
+			assertType('array{int}|array{string}', $row); // PHPStan keeps the optional entry, which the count proves absent
 		}
 
 		if (count($row) === 3) {
-			assertType('*NEVER*', $row); // SKIP: count() does not size a shape with explicit keys and optional entries, and the unequal branch learns nothing
+			assertType('*NEVER*', $row);
 		} else {
 			assertType('array{0: int, 3?: string|null}|array{string}', $row);
 		}

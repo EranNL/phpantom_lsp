@@ -106,14 +106,9 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B510 | [An overriding method's narrower return type is lost on some call sites](todo/bugs.md#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites) | Medium | Unknown |
-| B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
-| B488 | [A call proved through `?->` stays narrowed under its `->` spelling when the method is impure](todo/bugs.md#b488-a-call-proved-through---stays-narrowed-under-its---spelling-when-the-method-is-impure) | Low | Low-Medium |
-| B491 | [The receiver of a nullsafe call is not narrowed inside its arguments](todo/bugs.md#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments) | Low | Low-Medium |
-| B509 | [A false `strlen() > 0` guard does not narrow the string to `''`](todo/bugs.md#b509-a-false-strlen--0-guard-does-not-narrow-the-string-to-) | Low | Medium |
-| B487 | [An impure call does not forget what was proved about a static property](todo/bugs.md#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property) | Low | Medium |
-| B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
-| B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |
-| B492 | [What the constructor proves about a readonly property of a readonly property is not remembered](todo/bugs.md#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered) | Low | Medium |
+| B513 | [An assignment in the right operand of `&&` does not see what the left operand proved](todo/bugs.md#b513-an-assignment-in-the-right-operand-of--does-not-see-what-the-left-operand-proved) | Low | Low-Medium |
+| B512 | [A call whose argument is `*NEVER*` still has its declared return type](todo/bugs.md#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type) | Low | Low-Medium |
+| B511 | [A union of shapes is not folded when one alternative covers another](todo/bugs.md#b511-a-union-of-shapes-is-not-folded-when-one-alternative-covers-another) | Low | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

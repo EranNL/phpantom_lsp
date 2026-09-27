@@ -48,6 +48,7 @@ pub(crate) fn process_receiver_mutation<'b>(
             method: None,
         });
     }
+    forget_static_properties_after_impure_call(expr, scope, ctx);
     for invalidation in invalidations {
         if !invalidation.members {
             scope.invalidate_receiver_state(
@@ -91,6 +92,115 @@ pub(crate) fn process_receiver_mutation<'b>(
                 scope.set(&key, declared);
             }
         }
+    }
+}
+
+/// Forget what the scope knows through a static property when `expr`
+/// makes a call declared impure.
+///
+/// A static property is no object's state, so no receiver or argument of
+/// the call stands for it: any impure call may have written one.  A path
+/// through one goes back to what its declaration promises, and a call read
+/// through one is forgotten, the same as a receiver's.
+fn forget_static_properties_after_impure_call(
+    expr: &Expression<'_>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    // Checked first: the call lookups below are the expensive half, and
+    // most scopes hold no static property at all.
+    if !scope.locals.keys().any(|key| is_static_property_key(key)) {
+        return;
+    }
+    if !makes_impure_call(expr, scope, ctx) {
+        return;
+    }
+    // `self::$x = $this->impure();` writes the property after the call,
+    // so what the assignment recorded stands.
+    let written = match crate::parser::unwrap_parens(expr) {
+        Expression::Assignment(assignment) => narrowing::expr_to_subject_key(assignment.lhs),
+        _ => None,
+    };
+    let keys: Vec<String> = scope
+        .locals
+        .keys()
+        .filter(|key| is_static_property_key(key) && written.as_deref() != Some(&***key))
+        .map(|key| key.to_string())
+        .collect();
+    for key in keys {
+        let declared = if narrowing::is_call_key(&key) {
+            Vec::new()
+        } else {
+            super::cond_narrowing::declared_key_type(&key, scope, ctx)
+        };
+        if declared.is_empty() {
+            scope.remove(&key);
+        } else {
+            scope.set(&key, declared);
+        }
+    }
+}
+
+/// Whether a scope key reads through a static property: `self::$x`,
+/// `Foo::$x->y`, `static::$x['k']`, or a call on one of those.
+fn is_static_property_key(key: &str) -> bool {
+    key.split_once("::").is_some_and(|(class, rest)| {
+        rest.starts_with('$')
+            && !class.is_empty()
+            && class
+                .bytes()
+                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b >= 0x80)
+    })
+}
+
+/// Whether evaluating `expr` makes a call declared impure.
+fn makes_impure_call(expr: &Expression<'_>, scope: &ScopeState, ctx: &ForwardWalkCtx<'_>) -> bool {
+    match expr {
+        Expression::Parenthesized(inner) => makes_impure_call(inner.expression, scope, ctx),
+        Expression::Assignment(assignment) => makes_impure_call(assignment.rhs, scope, ctx),
+        Expression::Binary(bin) => {
+            makes_impure_call(bin.lhs, scope, ctx) || makes_impure_call(bin.rhs, scope, ctx)
+        }
+        Expression::UnaryPrefix(unary) => makes_impure_call(unary.operand, scope, ctx),
+        Expression::Call(call) => {
+            let (object, args) = match call {
+                Call::Method(mc) => (Some(mc.object), &mc.argument_list),
+                Call::NullSafeMethod(mc) => (Some(mc.object), &mc.argument_list),
+                Call::Function(fc) => (None, &fc.argument_list),
+                Call::StaticMethod(sc) => (None, &sc.argument_list),
+            };
+            if object.is_some_and(|object| makes_impure_call(object, scope, ctx))
+                || args
+                    .arguments
+                    .iter()
+                    .any(|arg| makes_impure_call(arg.value(), scope, ctx))
+            {
+                return true;
+            }
+            let effect = match call {
+                Call::Method(MethodCall { object, method, .. })
+                | Call::NullSafeMethod(NullSafeMethodCall { object, method, .. }) => {
+                    let ClassLikeMemberSelector::Identifier(ident) = method else {
+                        return false;
+                    };
+                    method_call_effect(object, bytes_to_str(ident.value), scope, ctx)
+                }
+                Call::StaticMethod(sc) => {
+                    let ClassLikeMemberSelector::Identifier(ident) = &sc.method else {
+                        return false;
+                    };
+                    static_call_effect(sc.class, bytes_to_str(ident.value), ctx).0
+                }
+                Call::Function(fc) => {
+                    let Expression::Identifier(ident) = fc.function else {
+                        return false;
+                    };
+                    function_call_effect(fc.function, bytes_to_str(ident.value()), ctx)
+                }
+            };
+            effect.forgets_own_result()
+        }
+        _ => false,
     }
 }
 

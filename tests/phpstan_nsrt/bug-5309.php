@@ -11,10 +11,10 @@ function greater(float $y): float {
 	}
 	assertType('0.0|1.0', $x);
 	if($x > 0) {
-		assertType('1.0', $x); // SKIP: a comparison does not narrow a union of float literals
+		assertType('1.0', $x);
 		return 5 / $x;
 	}
-	assertType('0.0|1.0', $x); // could be '0.0' when we support float-ranges
+	assertType('0.0', $x); // PHPStan keeps `0.0|1.0`, but `1.0 > 0` returned above
 
 	return 1.0;
 }
@@ -29,7 +29,7 @@ function greaterEqual(float $y): float {
 		assertType('0.0|1.0', $x);
 		return 5 / $x;
 	}
-	assertType('0.0|1.0', $x); // could be '*NEVER*' when we support float-ranges
+	assertType('*NEVER*', $x); // PHPStan keeps `0.0|1.0`, but both are `>= 0` and returned above
 
 	return 1.0;
 }
@@ -41,10 +41,10 @@ function smaller(float $y): float {
 	}
 	assertType('-1.0|0.0', $x);
 	if($x < 0) {
-		assertType('-1.0', $x); // SKIP: a comparison does not narrow a union of float literals
+		assertType('-1.0', $x);
 		return 5 / $x;
 	}
-	assertType('-1.0|0.0', $x); // could be '0.0' when we support float-ranges
+	assertType('0.0', $x); // PHPStan keeps `-1.0|0.0`, but `-1.0 < 0` returned above
 
 	return 1.0;
 }
@@ -59,7 +59,7 @@ function smallerEqual(float $y): float {
 		assertType('-1.0|0.0', $x);
 		return 5 / $x;
 	}
-	assertType('*NEVER*', $x); // SKIP: a comparison does not narrow a union of float literals
+	assertType('*NEVER*', $x);
 
 	return 1.0;
 }

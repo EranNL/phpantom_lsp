@@ -420,7 +420,10 @@ fn descend_for_short_circuit<'b>(
                 }
                 Call::NullSafeMethod(mc) => {
                     visit(mc.object);
-                    &mc.argument_list
+                    if !mc.argument_list.arguments.is_empty() {
+                        record_nullsafe_argument_snapshots(mc, scope, ctx);
+                    }
+                    return;
                 }
                 Call::StaticMethod(sc) => &sc.argument_list,
             };
@@ -450,6 +453,26 @@ fn descend_for_short_circuit<'b>(
         }
         _ => {}
     }
+}
+
+/// Record the scope the arguments of a `?->` call run under: the receiver
+/// is not null there, or the call would have short-circuited before
+/// reaching them.
+fn record_nullsafe_argument_snapshots<'b>(
+    call: &'b NullSafeMethodCall<'b>,
+    scope: &ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut narrowed = scope.clone();
+    narrow_nullsafe_call_receiver(call.object, &mut narrowed, ctx);
+    for arg in call.argument_list.arguments.iter() {
+        let value = argument_value(arg);
+        record_scope_snapshot(value.span().start.offset, &narrowed);
+        record_scope_snapshot_recursive(value, &narrowed);
+        record_short_circuit_snapshots_inner(value, &narrowed, ctx);
+    }
+    // What follows the call reads the receiver as it was.
+    record_scope_snapshot(call.argument_list.span().end.offset, scope);
 }
 
 /// The expression an argument carries, whether it was passed

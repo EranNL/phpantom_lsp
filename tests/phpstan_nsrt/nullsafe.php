@@ -19,7 +19,7 @@ class Foo
 		assertType('Throwable|null', $e?->getPrevious());
 		assertType('string|null', $e?->getPrevious()?->getMessage());
 
-		$e?->getMessage(assertType('Exception', $e)); // SKIP: the receiver of a nullsafe call is not narrowed to non-null inside its arguments
+		$e?->getMessage(assertType('Exception', $e));
 	}
 
 	public function doBar(?\ReflectionClass $r)

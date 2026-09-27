@@ -72,7 +72,7 @@ class NarrowsStaticNativeUnion {
 		assertNativeType('int', self::$i);
 
 		$this->impureCall();
-		assertType('float|int', self::$i); // SKIP: an impure call does not forget what was proved about a static property
+		assertType('float|int', self::$i);
 		assertNativeType('float|int', self::$i);
 	}
 
@@ -99,7 +99,7 @@ class UsesBaseClass extends BaseClass
 		assertNativeType('int', parent::$i);
 
 		$this->impureCall();
-		assertType('float|int', parent::$i); // SKIP: an impure call does not forget what was proved about a static property
+		assertType('float|int', parent::$i);
 		assertNativeType('float|int', parent::$i);
 	}
 

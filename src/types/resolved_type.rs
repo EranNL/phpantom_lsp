@@ -482,6 +482,10 @@ impl ResolvedType {
             for rt in results.iter_mut() {
                 rt.restrict_type_string_to_classes(&survives);
             }
+            // The same proof about a `null` that sits in an entry of its
+            // own: `A|B|null` resolves to one entry per class and one for
+            // the `null`, which no class-level narrowing ever sees.
+            results.retain(|rt| rt.class_info.is_some() || !rt.type_string.is_null());
         }
 
         // Add entries that narrowing introduced (e.g. instanceof

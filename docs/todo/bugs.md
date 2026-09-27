@@ -30,135 +30,35 @@ No outstanding items.
 
 ## Reachability
 
-No outstanding items.
-
-## Narrowing
-
-### B487. An impure call does not forget what was proved about a static property
-**Impact: Low · Complexity: Medium**
-
-```php
-private static int|float $i;
-public function __construct() {
-    self::$i = getInt();
-    $this->impureCall(); // @phpstan-impure
-    self::$i; // should be float|int, is int
-}
-```
-
-`process_receiver_mutation` invalidates what is known through the receiver (`$this->…`), but any impure call can write a static property, so `self::$x`, `static::$x`, `parent::$x` and `Foo::$x` keys have to go too.
-
-Found porting PHPStan's `nsrt/bug-12902.php` and `nsrt/bug-12902-non-strict.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
-
-### B488. A call proved through `?->` stays narrowed under its `->` spelling when the method is impure
+### B512. A call whose argument is `*NEVER*` still has its declared return type
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-if ($bar?->getImpure() !== null) { // @phpstan-impure, returns ?int
-    $bar->getImpure();  // should be int|null, is int
-    $bar?->getImpure(); // int|null (correct)
+$this->foo = 'x';
+if (strlen($this->foo) > 0) {
+    return;
 }
+$this->foo;         // *NEVER* (correct)
+strlen($this->foo); // should be *NEVER*, is int<0, max>
 ```
 
-The nullsafe spelling of the call is forgotten as an impure result, but the `->` spelling the condition also proves is kept.
-
-Found porting PHPStan's `nsrt/bug-4757.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B489. A comparison does not narrow a union of float literals
-**Impact: Low · Complexity: Medium**
-
-```php
-$x = 0.0;
-if ($y > 0) { $x += 1; }
-if ($x > 0) {
-    $x; // should be 1.0, is 0.0|1.0
-}
-```
-
-Integer literal unions are narrowed by `<`, `>`, `<=` and `>=`; float literals are left as they were.
-
-Found porting PHPStan's `nsrt/bug-5309.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B509. A false `strlen() > 0` guard does not narrow the string to `''`
-**Impact: Low · Complexity: Medium**
-
-```php
-function f(string $s) {
-    if (strlen($s) > 0) {
-        return;
-    }
-    $s;         // should be '', is string
-    strlen($s); // should be 0, is int<0, max>
-}
-```
-
-A comparison on the length of a string says what the string is: a length of zero is the empty string, a positive one is `non-empty-string`.
+Evaluating the argument never completes, so neither does the call. The call resolvers read the callee's return type without looking at whether an argument could have been produced at all.
 
 Found porting PHPStan's `nsrt/bug-5129.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
-### B490. `count()` does not size a shape with explicit keys and optional entries
-**Impact: Low · Complexity: Medium**
+## Narrowing
 
-```php
-/** @param array{0: mixed, 1?: string|null} $row */
-function f(array $row) {
-    if (count($row) === 1) {
-        $row; // should be array{mixed}, is array{0: mixed, 1?: string|null}
-    } else {
-        $row; // should be array{mixed, string|null}
-    }
-}
-```
-
-`list_of_size` gives up on a shape whose entries spell out their keys, even when the keys are the sequential ones a list has. The branch where the sizes differ learns nothing either, although it rules out the size the check named.
-
-Found porting PHPStan's `nsrt/list-count.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B491. The receiver of a nullsafe call is not narrowed inside its arguments
+### B513. An assignment in the right operand of `&&` does not see what the left operand proved
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
 function f(?\Exception $e) {
-    $e?->getMessage(g($e)); // $e should be Exception inside the arguments, is ?Exception
+    $e !== null && $x = $e;
+    $x; // should be Exception, is ?Exception
 }
 ```
 
-The arguments are only evaluated when the receiver is not null.
-
-Found porting PHPStan's `nsrt/nullsafe.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B492. What the constructor proves about a readonly property of a readonly property is not remembered
-**Impact: Low · Complexity: Medium**
-
-```php
-public readonly ?Foo $prop; // Foo has `public readonly int $readonly`
-public function __construct() {
-    $this->prop = new Foo();
-    if ($this->prop->readonly != 5) { throw new LogicException(); }
-}
-public function doFoo() {
-    $this->prop->readonly; // should be 5, is int
-}
-```
-
-`seed_constructor_readonly_properties` carries the class's own readonly properties into the other methods. A path through two readonly properties cannot change either, so it can be carried too.
-
-Found porting PHPStan's `nsrt/remember-readonly-constructor-narrowed.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B507. An assertion on a value typed as a union of classes and `null` leaves the `null`
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-class A { /** @return A|B|null */ public function abn() {} }
-/** @psalm-assert A $v */
-function assertA($v): void {}
-
-$x = $a->abn();
-assertA($x);
-$x; // should be A, is A|null
-```
-
-The value resolves to one entry per class plus a separate `null` entry, and the assertion narrows the class entries without dropping the `null` one. A single class (`?A`) carries the `null` inside its own entry and narrows correctly. PHPUnit's `assertInstanceOf()` goes through the same path.
+`process_nested_assignments` walks both operands of a binary expression against the same scope, so the right operand of `&&` (and of `||`) resolves its assignments without the proof the left operand made, and the write it makes is treated as unconditional. A cursor inside the right operand already sees the narrowing, through `apply_cursor_ternary_narrowing`. The fix is the one the `?->` arguments got: walk the right operand on a narrowed copy and join it with the path that skipped it, which costs a scope clone per chain that holds an assignment.
 
 ## Arithmetic
 
@@ -170,7 +70,19 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B511. A union of shapes is not folded when one alternative covers another
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param array{mixed}|array{0: mixed, 1?: string|null} $row */
+function f(array $row) {
+    $row; // should be array{0: mixed, 1?: string|null}, is array{mixed}|array{0: mixed, 1?: string|null}
+}
+```
+
+`array{mixed}` is one of the values `array{0: mixed, 1?: string|null}` describes, so the union is the larger shape alone. The join after a branch has the same gap from the other side: `join_shapes` refuses shapes with positional entries, so `array{mixed}` and `array{0: mixed, 1: string|null}` from the two sides of `if (count($row) === 2)` stay two alternatives instead of folding back into `array{0: mixed, 1?: string|null}`.
+
+Found porting PHPStan's `nsrt/list-count.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 ## Laravel
 

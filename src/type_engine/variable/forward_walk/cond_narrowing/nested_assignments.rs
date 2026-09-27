@@ -101,7 +101,10 @@ pub(crate) fn process_nested_assignments<'b>(
             }
             Call::NullSafeMethod(mc) => {
                 process_nested_assignments(mc.object, scope, ctx);
-                &mc.argument_list
+                if !mc.argument_list.arguments.is_empty() {
+                    process_nullsafe_argument_assignments(mc, scope, ctx);
+                }
+                return;
             }
             Call::StaticMethod(sc) => &sc.argument_list,
         };
@@ -159,6 +162,24 @@ pub(crate) fn process_nested_assignments<'b>(
         }
         _ => {}
     }
+}
+
+/// Apply the assignments in the arguments of a `?->` call.
+///
+/// The arguments run only when the receiver is not null, so they see it
+/// narrowed, and what they write is joined with the path where the call
+/// short-circuited and wrote nothing.
+fn process_nullsafe_argument_assignments<'b>(
+    call: &'b NullSafeMethodCall<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    let mut ran = scope.clone();
+    narrow_nullsafe_call_receiver(call.object, &mut ran, ctx);
+    for arg in call.argument_list.arguments.iter() {
+        process_nested_assignments(arg.value(), &mut ran, ctx);
+    }
+    scope.merge_branch(&ran);
 }
 
 fn process_nested_assignments_in_element<'b>(

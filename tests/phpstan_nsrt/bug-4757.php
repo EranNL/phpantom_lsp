@@ -195,7 +195,7 @@ class Foo
 		}
 
 		assertType(Bar::class, $barOrNull);
-		assertType('int|null', $barOrNull->getImpure()); // SKIP: a call proved through ?-> is remembered under its -> spelling even when the method is impure
+		assertType('int|null', $barOrNull->getImpure());
 		assertType('int|null', $barOrNull?->getImpure());
 	}
 

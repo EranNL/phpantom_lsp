@@ -139,7 +139,7 @@ class DeepPropertyFetching {
 
 	public function doFoo() {
 		assertType(Foo::class, $this->prop);
-		assertType('5', $this->prop->readonly); // SKIP: what the constructor proves about a readonly property of a readonly property is not remembered
+		assertType('5', $this->prop->readonly);
 		assertType('int', $this->prop->writable);
 	}
 }

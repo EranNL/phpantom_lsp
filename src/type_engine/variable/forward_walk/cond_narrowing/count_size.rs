@@ -6,8 +6,8 @@ use crate::php_type::ShapeEntry;
 /// the list keeps its generic form, the same cut-off PHPStan makes.
 const SHAPE_SIZE_LIMIT: i64 = 256;
 
-/// Narrow a list whose `count()` a condition pins to one size into the
-/// shape with that many entries.
+/// Narrow a list or shape whose `count()` a condition compares with one
+/// size.
 ///
 /// ```php
 /// /** @param list<int> $xs */
@@ -16,11 +16,11 @@ const SHAPE_SIZE_LIMIT: i64 = 256;
 ///
 /// The size is a written integer, or the `count()` of a shape whose length
 /// is fixed: `count($a) == count($b)` gives `$b` the length of an
-/// `array{int, int, int}` `$a`.  A list-shaped shape with optional entries
-/// keeps as many of them as the size needs.  Only the branch where the
-/// sizes are equal learns anything; an inequality rules out one size of
-/// many.  A size the subject cannot have (a negative one, or one its
-/// shape has no room for) exhausts it.
+/// `array{int, int, int}` `$a`.  A shape with optional entries keeps as
+/// many of them as the size needs, when that says which ones.  The branch
+/// where the sizes differ rules that one size out, which settles a shape
+/// that had only one other size it could be.  A size the subject cannot
+/// have (a negative one, or one its shape has no room for) exhausts it.
 pub(super) fn apply_count_size_narrowing(
     condition: &Expression<'_>,
     scope: &mut ScopeState,
@@ -36,9 +36,7 @@ pub(super) fn apply_count_size_narrowing(
         BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_) => negated,
         _ => return,
     };
-    if equal != truthy {
-        return;
-    }
+    let equal = equal == truthy;
     for (counted, other) in [(bin.lhs, bin.rhs), (bin.rhs, bin.lhs)] {
         let Some((subject, recursive)) = count_call(counted) else {
             continue;
@@ -48,13 +46,15 @@ pub(super) fn apply_count_size_narrowing(
         };
         // `count()` never returns a negative number.
         if size < 0 {
-            seed_synthetic_key_if_needed(&subject, scope, ctx);
-            if !scope.get(&subject).is_empty() {
-                mark_exhausted(&subject, scope);
+            if equal {
+                seed_synthetic_key_if_needed(&subject, scope, ctx);
+                if !scope.get(&subject).is_empty() {
+                    mark_exhausted(&subject, scope);
+                }
             }
             continue;
         }
-        if !(1..SHAPE_SIZE_LIMIT).contains(&size) {
+        if !(0..SHAPE_SIZE_LIMIT).contains(&size) {
             continue;
         }
         seed_synthetic_key_if_needed(&subject, scope, ctx);
@@ -63,37 +63,42 @@ pub(super) fn apply_count_size_narrowing(
             continue;
         }
         let mut changed = false;
-        let narrowed: Vec<ResolvedType> = types
-            .iter()
-            .filter_map(|rt| {
-                // A recursive count adds the entries of nested arrays, so
-                // it is the list's length only when no element is one.
-                if recursive
+        let mut narrowed: Vec<ResolvedType> = Vec::with_capacity(types.len());
+        for rt in types {
+            // A class-backed entry is no array to size, and a recursive
+            // count adds the entries of nested arrays, so it is the list's
+            // length only when no element is one.
+            if rt.class_info.is_some()
+                || recursive
                     && !rt
                         .type_string
                         .iterable_element_type()
                         .is_some_and(|element| is_never_an_array(&element))
-                {
-                    return Some(rt.clone());
+            {
+                narrowed.push(rt.clone());
+                continue;
+            }
+            let sized = if equal {
+                of_size(&rt.type_string, size as usize)
+            } else {
+                not_of_size(&rt.type_string, size as usize)
+            };
+            match sized {
+                // Each alternative stays its own entry, so the join after
+                // the branch can fold a sized shape back together with
+                // the one the other branch sized.
+                Some(members) => {
+                    changed = true;
+                    narrowed.extend(members.into_iter().map(ResolvedType::from_type_string));
                 }
-                let sized = list_of_size(&rt.type_string, size as usize);
-                match sized {
-                    Some(Some(ty)) => {
-                        changed = true;
-                        Some(ResolvedType::from_type_string(ty))
-                    }
-                    // A shape that cannot have this many entries.
-                    Some(None) => {
-                        changed = true;
-                        None
-                    }
-                    None => Some(rt.clone()),
-                }
-            })
-            .collect();
+                None => narrowed.push(rt.clone()),
+            }
+        }
         if !changed {
             continue;
         }
+        // Sizing two alternatives can leave the same shape twice.
+        ResolvedType::drop_subsumed_entries(&mut narrowed, false);
         if narrowed.is_empty() {
             mark_exhausted(&subject, scope);
         } else {
@@ -192,28 +197,25 @@ fn is_never_an_array(ty: &PhpType) -> bool {
     })
 }
 
-/// `ty` as a list of exactly `size` entries: `Some(Some(shape))` when it
-/// is a list that can have that many, `Some(None)` when it is a list that
-/// cannot, and `None` when it is not a list this knows how to size.
-fn list_of_size(ty: &PhpType, size: usize) -> Option<Option<PhpType>> {
-    match ty.kind() {
+/// The alternatives of `ty` that have exactly `size` entries, or `None`
+/// when it is not a list or shape this knows how to size.  A union is
+/// sized member by member.
+fn of_size(ty: &PhpType, size: usize) -> Option<Vec<PhpType>> {
+    refine_members(ty, &|member| match member.kind() {
         TypeKind::ArrayShape(entries) => {
-            if entries.iter().any(|entry| entry.key.is_some()) {
-                return None;
-            }
-            let required = entries.iter().filter(|entry| !entry.optional).count();
-            if size < required || size > entries.len() {
+            let is_list = is_list_ordered(member, entries);
+            let (required, total) = shape_size_bounds(entries);
+            if size < required || size > total {
                 return Some(None);
             }
-            let sized: Vec<ShapeEntry> = entries[..size]
-                .iter()
-                .map(|entry| ShapeEntry {
-                    optional: false,
-                    ..entry.clone()
-                })
-                .collect();
-            Some(Some(PhpType::array_shape(sized)))
+            // Which optional entries a size in between leaves is known
+            // only for a list, whose entries are present from the front.
+            (size == required || size == total || is_list)
+                .then(|| Some(shape_prefix(member, entries, size, is_list)))
         }
+        // A size of zero is the empty array, which the emptiness checks
+        // already narrow to.
+        _ if size == 0 => None,
         TypeKind::Generic(g)
             if g.args.len() == 1
                 && matches!(
@@ -232,6 +234,131 @@ fn list_of_size(ty: &PhpType, size: usize) -> Option<Option<PhpType>> {
             Some(Some(repeated_shape(&PhpType::mixed(), size)))
         }
         _ => None,
+    })
+}
+
+/// The alternatives of `ty` that do not have exactly `size` entries, with
+/// the same answers as [`of_size`].
+///
+/// Only a shape learns anything: ruling one size out of a list leaves every
+/// other size it could have.  A shape whose sizes run from its required
+/// entries to all of them keeps the ones either side of `size`, which it
+/// can spell when they are one size, or when it is a list and `size` is at
+/// one end of the run.
+fn not_of_size(ty: &PhpType, size: usize) -> Option<Vec<PhpType>> {
+    refine_members(ty, &|member| {
+        let TypeKind::ArrayShape(entries) = member.kind() else {
+            return None;
+        };
+        let is_list = is_list_ordered(member, entries);
+        let (required, total) = shape_size_bounds(entries);
+        if size < required || size > total {
+            return None;
+        }
+        if required == total {
+            return Some(None);
+        }
+        if required + 1 == total {
+            let other = if size == required { total } else { required };
+            return Some(Some(shape_prefix(member, entries, other, is_list)));
+        }
+        if !is_list {
+            return None;
+        }
+        if size == required {
+            // The entry after the required ones is present too.
+            let entries: Vec<ShapeEntry> = entries
+                .iter()
+                .enumerate()
+                .map(|(i, entry)| ShapeEntry {
+                    optional: entry.optional && i != required,
+                    ..entry.clone()
+                })
+                .collect();
+            return Some(Some(rebuild_shape(member, entries)));
+        }
+        if size == total {
+            let entries = entries[..total - 1].to_vec();
+            return Some(Some(rebuild_shape(member, entries)));
+        }
+        None
+    })
+}
+
+/// Distribute a per-member sizing over a union: each member is refined by
+/// `refine`, kept when it answers `None`, and dropped when it answers
+/// `Some(None)`.  `None` when no member changed.
+fn refine_members(
+    ty: &PhpType,
+    refine: &dyn Fn(&PhpType) -> Option<Option<PhpType>>,
+) -> Option<Vec<PhpType>> {
+    let mut changed = false;
+    let mut kept = Vec::new();
+    for member in ty.union_members() {
+        match refine(member) {
+            Some(sized) => {
+                changed = true;
+                kept.extend(sized);
+            }
+            None => kept.push(member.clone()),
+        }
+    }
+    changed.then_some(kept)
+}
+
+/// How many entries a shape holds at the least and at the most.
+fn shape_size_bounds(entries: &[ShapeEntry]) -> (usize, usize) {
+    let required = entries.iter().filter(|entry| !entry.optional).count();
+    (required, entries.len())
+}
+
+/// Whether a shape's entries are present from the front, the way a list's
+/// are: it is a `list{…}`, or its keys are positional, and no required
+/// entry follows an optional one.
+fn is_list_ordered(shape: &PhpType, entries: &[ShapeEntry]) -> bool {
+    let positional = matches!(shape.raw_kind(), TypeKind::ListShape(_))
+        || entries.iter().all(|entry| entry.key.is_none());
+    positional
+        && entries
+            .iter()
+            .skip_while(|entry| !entry.optional)
+            .all(|entry| entry.optional)
+}
+
+/// The shape with exactly `size` of its entries: its required ones and,
+/// when `size` is more than those, every optional one (`size` is its
+/// full length) or the ones at the front (a list).
+fn shape_prefix(shape: &PhpType, entries: &[ShapeEntry], size: usize, is_list: bool) -> PhpType {
+    let (required, total) = shape_size_bounds(entries);
+    let sized: Vec<ShapeEntry> = if is_list {
+        entries[..size].to_vec()
+    } else if size == total {
+        entries.to_vec()
+    } else {
+        debug_assert_eq!(size, required);
+        entries
+            .iter()
+            .filter(|entry| !entry.optional)
+            .cloned()
+            .collect()
+    };
+    let sized = sized
+        .into_iter()
+        .map(|entry| ShapeEntry {
+            optional: false,
+            ..entry
+        })
+        .collect();
+    rebuild_shape(shape, sized)
+}
+
+/// A shape with `entries`, tagged as a list when `like` was one.
+fn rebuild_shape(like: &PhpType, entries: Vec<ShapeEntry>) -> PhpType {
+    let shape = PhpType::array_shape(entries);
+    if matches!(like.raw_kind(), TypeKind::ListShape(_)) {
+        PhpType::as_list_shape(shape)
+    } else {
+        shape
     }
 }
 

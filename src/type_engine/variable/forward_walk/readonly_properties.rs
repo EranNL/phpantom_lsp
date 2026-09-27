@@ -2,12 +2,14 @@
 //! starting point of every other method's scope.
 
 use std::cell::RefCell;
+use std::sync::Arc;
 
 use mago_syntax::cst::class_like::member::ClassLikeMember;
 use mago_syntax::cst::class_like::method::{Method, MethodBody};
 
 use super::*;
 use crate::atom::bytes_to_str;
+use crate::php_type::PhpType;
 use crate::types::PropertyInfo;
 
 thread_local! {
@@ -118,8 +120,20 @@ fn constructor_narrowed_properties(
         .filter(|p| !is_promoted(&p.name))
         .map(|p| (*p, format!("$this->{}", p.name)))
         .collect();
+    // A promoted property is still worth the walk when the constructor
+    // proves something about one of its own properties.
     if candidates.is_empty() {
-        return Vec::new();
+        let span = body.span();
+        let body_text = ctx
+            .content
+            .get(span.start.offset as usize..span.end.offset as usize)
+            .unwrap_or("");
+        if !readonly
+            .iter()
+            .any(|p| body_text.contains(&format!("$this->{}->", p.name)))
+        {
+            return Vec::new();
+        }
     }
 
     let walk_ctx = ForwardWalkCtx {
@@ -171,27 +185,115 @@ fn constructor_narrowed_properties(
         }
     }
 
-    candidates
+    let mut narrowed: Vec<(String, Vec<ResolvedType>)> = candidates
         .into_iter()
         .filter_map(|(prop, key)| {
-            let declared = prop.type_hint.as_ref()?;
-            let assigned = ctor_scope.get(&key);
-            if assigned.is_empty() {
-                return None;
-            }
-            let assigned_type = ResolvedType::types_joined(assigned);
-            if assigned_type.equivalent(declared)
-                || !crate::class_lookup::is_subtype_of_typed(
-                    &assigned_type,
-                    declared,
-                    ctx.class_loader,
-                )
-            {
-                return None;
-            }
-            Some((key, assigned.to_vec()))
+            let assigned =
+                narrower_than_declared(&ctor_scope, &key, prop.type_hint.as_ref()?, ctx)?;
+            Some((key, assigned))
         })
-        .collect()
+        .collect();
+
+    // A readonly property of the object a readonly property holds cannot
+    // change either, so what the constructor proved about it holds in
+    // every other method too.
+    for outer in readonly {
+        let outer_key = format!("$this->{}", outer.name);
+        let prefix = format!("{outer_key}->");
+        let inner_keys: Vec<String> = ctor_scope
+            .locals
+            .keys()
+            .filter_map(|key| {
+                let name = key.strip_prefix(prefix.as_str())?;
+                name.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b >= 0x80)
+                    .then(|| key.to_string())
+            })
+            .collect();
+        if inner_keys.is_empty() {
+            continue;
+        }
+        // A promoted property holds the parameter, which has the declared
+        // type.
+        let declared_holder;
+        let holder_types = match ctor_scope.get(&outer_key) {
+            [] => {
+                let Some(declared) = &outer.type_hint else {
+                    continue;
+                };
+                declared_holder = walk_ctx.resolved_types_for(declared.clone());
+                &declared_holder[..]
+            }
+            types => types,
+        };
+        let holders: Vec<Arc<crate::types::ClassInfo>> = holder_types
+            .iter()
+            .filter_map(|rt| rt.class_info.clone())
+            .collect();
+        if holders.is_empty() {
+            continue;
+        }
+        for key in inner_keys {
+            let name = &key[prefix.len()..];
+            let Some(declared) = readonly_property_type(&holders, name, ctx) else {
+                continue;
+            };
+            if let Some(assigned) = narrower_than_declared(&ctor_scope, &key, &declared, ctx) {
+                narrowed.push((key, assigned));
+            }
+        }
+    }
+    narrowed
+}
+
+/// What the scope holds under `key`, when that is narrower than the
+/// `declared` type, as PHPStan takes it: a `?int` assigned to an `int`
+/// property stays `int`.
+fn narrower_than_declared(
+    scope: &ScopeState,
+    key: &str,
+    declared: &PhpType,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<Vec<ResolvedType>> {
+    let assigned = scope.get(key);
+    if assigned.is_empty() {
+        return None;
+    }
+    let assigned_type = ResolvedType::types_joined(assigned);
+    if assigned_type.equivalent(declared)
+        || !crate::class_lookup::is_subtype_of_typed(&assigned_type, declared, ctx.class_loader)
+    {
+        return None;
+    }
+    Some(assigned.to_vec())
+}
+
+/// The declared type of the property `name` when every class in `holders`
+/// declares it readonly with the same type.
+fn readonly_property_type(
+    holders: &[Arc<crate::types::ClassInfo>],
+    name: &str,
+    ctx: &ForwardWalkCtx<'_>,
+) -> Option<PhpType> {
+    let mut declared: Option<PhpType> = None;
+    for holder in holders {
+        let merged = crate::virtual_members::resolve_class_fully_maybe_cached(
+            holder,
+            ctx.class_loader,
+            ctx.resolved_class_cache,
+        );
+        let prop = merged.properties.iter().find(|p| p.name == name)?;
+        if prop.is_static || !(prop.is_readonly || merged.is_readonly) {
+            return None;
+        }
+        let ty = prop.type_hint.clone()?;
+        match &declared {
+            Some(existing) if *existing != ty => return None,
+            Some(_) => {}
+            None => declared = Some(ty),
+        }
+    }
+    declared
 }
 
 /// The constructor of the class whose body opens at `body_offset`.

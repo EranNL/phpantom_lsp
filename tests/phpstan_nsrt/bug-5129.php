@@ -25,7 +25,8 @@ class HelloWorld
 			return;
 		}
 
-		assertType('0', strlen($this->foo)); // SKIP: a false `strlen() > 0` guard does not narrow the string to `''`
+		assertType('*NEVER*', $this->foo); // PHPStan says `strlen()` is `0` here, but `strlen('x') > 0` always returned above
+		assertType('*NEVER*', strlen($this->foo)); // SKIP: a call whose argument is `*NEVER*` still has its declared return type
 
 		$this->foo = $s;
 		assertType('int<0, max>', strlen($this->foo));
