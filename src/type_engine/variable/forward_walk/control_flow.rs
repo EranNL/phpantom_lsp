@@ -61,15 +61,25 @@ fn catches_everything(try_stmt: &Try<'_>) -> bool {
 /// state before each of them: the assignments the body made before the
 /// throw, but not the one the throwing statement was about to make
 /// (`$x = mayThrow();` leaves `$x` as it was).
+///
+/// When `throws` is given, what each statement can throw is added to it.
 fn walk_try_body<'b>(
     try_stmt: &'b Try<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
+    mut throws: Option<&mut ThrowPoints>,
 ) -> ScopeState {
     let mut catch_entry = scope.clone();
     for (i, stmt) in try_stmt.block.statements.iter().enumerate() {
         if i > 0 {
             catch_entry.merge_branch(scope);
+        }
+        if let Some(throws) = throws.as_deref_mut() {
+            let flat = matches!(
+                stmt,
+                Statement::Expression(_) | Statement::Return(_) | Statement::Echo(_)
+            );
+            throws.collect(stmt, flat.then_some(&*scope), ctx);
         }
         walk_body_forward(std::iter::once(stmt), scope, ctx);
     }
@@ -96,7 +106,7 @@ pub(crate) fn process_try<'b>(
         ctx.cursor_offset >= catch_span.start.offset && ctx.cursor_offset <= catch_span.end.offset
     });
     if let Some(catch) = cursor_in_catch {
-        *scope = walk_try_body(try_stmt, scope, ctx);
+        *scope = walk_try_body(try_stmt, scope, ctx, None);
         bind_catch_variable(catch, scope, ctx);
         walk_body_forward(catch.block.statements.iter(), scope, ctx);
         return;
@@ -112,9 +122,13 @@ pub(crate) fn process_try<'b>(
             // returns or rethrows, since the block runs before it leaves),
             // and an exception no catch takes, which arrives with whatever
             // the try body had done when it threw.
-            let catch_entry = walk_try_body(try_stmt, scope, ctx);
+            let mut throws = ThrowPoints::default();
+            let catch_entry = walk_try_body(try_stmt, scope, ctx, Some(&mut throws));
             let mut merged = scope.clone();
             for catch in try_stmt.catch_clauses.iter() {
+                if !throws.reach(catch, ctx) {
+                    continue;
+                }
                 let mut catch_scope = catch_entry.clone();
                 bind_catch_variable(catch, &mut catch_scope, ctx);
                 walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
@@ -131,11 +145,16 @@ pub(crate) fn process_try<'b>(
 
     // Cursor is after the try/catch/finally.  Walk the try body and
     // merge all catch scopes.
-    let catch_entry = walk_try_body(try_stmt, scope, ctx);
+    let mut throws = ThrowPoints::default();
+    let collect = (!try_stmt.catch_clauses.is_empty()).then_some(&mut throws);
+    let catch_entry = walk_try_body(try_stmt, scope, ctx, collect);
     let try_scope = scope.clone();
 
     let mut all_scopes = vec![try_scope];
     for catch in try_stmt.catch_clauses.iter() {
+        if !throws.reach(catch, ctx) {
+            continue;
+        }
         let mut catch_scope = catch_entry.clone();
         bind_catch_variable(catch, &mut catch_scope, ctx);
         walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);

@@ -115,7 +115,6 @@ unlikely to move the needle for most users.
 | B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
 | B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |
 | B492 | [What the constructor proves about a readonly property of a readonly property is not remembered](todo/bugs.md#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered) | Low | Medium |
-| B493 | [A `catch` the try body cannot reach is still merged into `finally`](todo/bugs.md#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

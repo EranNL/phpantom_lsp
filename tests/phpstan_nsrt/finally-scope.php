@@ -130,7 +130,7 @@ class Foo
 			assertType('1', $s);
 			$s = "bar";
 		} finally {
-			assertType('1', $s); // SKIP: a catch for an exception the try body cannot throw is not recognised as dead
+			assertType('1', $s);
 		}
 	}
 

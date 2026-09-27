@@ -30,23 +30,7 @@ No outstanding items.
 
 ## Reachability
 
-### B493. A `catch` the try body cannot reach is still merged into `finally`
-**Impact: Low · Complexity: Medium-High**
-
-```php
-try {
-    $s = 1;
-    $this->throwsLogicException(); // @throws LogicException
-} catch (\RuntimeException $e) {
-    $s = 'bar';
-} finally {
-    $s; // should be 1, is 1|'bar'
-}
-```
-
-Telling that a catch is dead needs the exceptions the try body can throw, read from the `@throws` of what it calls.
-
-Found porting PHPStan's `nsrt/finally-scope.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Narrowing
 
