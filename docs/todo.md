@@ -105,11 +105,11 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B494 | [A nullsafe access does not add `null` for a nullable receiver](todo/bugs.md#b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver) | Medium | Low-Medium |
-| B481 | [An element function drops the `false` or `null` an empty array gives](todo/bugs.md#b481-an-element-function-drops-the-false-or-null-an-empty-array-gives) | Medium | Medium |
 | B484 | [`array_merge()` of array literals does not produce the merged shape](todo/bugs.md#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape) | Low-Medium | Medium |
 | B496 | [A static call on an intersection-typed variable or on a property has no type](todo/bugs.md#b496-a-static-call-on-an-intersection-typed-variable-or-on-a-property-has-no-type) | Low-Medium | Medium |
 | B499 | [`array_map()` with a closure that rewrites its parameter keeps the parameter's shape](todo/bugs.md#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape) | Low-Medium | Medium |
+| B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
+| B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
 | B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
 | B498 | [A variable first introduced by a by-reference closure `use` is not typed `null`](todo/bugs.md#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null) | Low | Low |
 | B503 | [A conditional on a name that is not a parameter picks the else branch](todo/bugs.md#b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch) | Low | Low |

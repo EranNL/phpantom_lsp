@@ -275,6 +275,14 @@ pub(super) fn collect_proven_non_null_exprs<'b>(
                 return;
             }
 
+            // Only an object is an instance of anything.
+            if matches!(bin.operator, BinaryOperator::Instanceof(_)) {
+                if truthy {
+                    out.push(bin.lhs);
+                }
+                return;
+            }
+
             let inequality = matches!(
                 bin.operator,
                 BinaryOperator::NotIdentical(_) | BinaryOperator::NotEqual(_)

@@ -93,6 +93,88 @@ pub(super) fn runtime_named_member_type() -> Vec<ResolvedType> {
     vec![ResolvedType::from_type_string(PhpType::mixed())]
 }
 
+/// Whether a member access's receiver can be `null`, as far as a
+/// short-circuiting `?->` is concerned.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ReceiverNullability {
+    Never,
+    Maybe,
+    Always,
+}
+
+impl ReceiverNullability {
+    /// Read the nullability off a receiver's resolved types.  `mixed`
+    /// counts as non-null: whatever a member of it reads is `mixed`
+    /// already, so the extra `null` would say nothing.
+    pub(super) fn of(resolved: &[ResolvedType]) -> Self {
+        let mut any_null = false;
+        let mut all_null = !resolved.is_empty();
+        for rt in resolved {
+            let ty = &rt.type_string;
+            if ty.is_null() {
+                any_null = true;
+            } else {
+                all_null = false;
+                any_null |= matches!(ty.kind(), TypeKind::Nullable(_))
+                    || matches!(ty.kind(), TypeKind::Union(members) if members.iter().any(PhpType::is_null));
+            }
+        }
+        match (all_null, any_null) {
+            (true, _) => Self::Always,
+            (false, true) => Self::Maybe,
+            (false, false) => Self::Never,
+        }
+    }
+}
+
+/// Whether a member access chain runs through a `?->` before reaching
+/// `expr`'s own link, so that a `null` there short-circuits the rest of
+/// the chain rather than being read through.
+pub(super) fn chain_has_nullsafe<'b>(mut expr: &'b Expression<'b>) -> bool {
+    loop {
+        expr = peel_type_transparent(expr);
+        expr = match expr {
+            Expression::Access(Access::NullSafeProperty(_))
+            | Expression::Call(Call::NullSafeMethod(_)) => return true,
+            Expression::Access(Access::Property(pa)) => pa.object,
+            Expression::Call(Call::Method(mc)) => mc.object,
+            Expression::ArrayAccess(aa) => aa.array,
+            _ => return false,
+        };
+    }
+}
+
+/// Fold a `?->` short-circuit into a member access's result.
+///
+/// A nullsafe link whose receiver is `null` evaluates to `null` without
+/// reading the member, and so does every link after it in the same chain.
+/// `nullsafe` is whether this link is `?->` itself; `object` is its
+/// receiver expression, consulted only when the receiver can be `null`.
+pub(super) fn apply_nullsafe_short_circuit(
+    result: &mut Vec<ResolvedType>,
+    receiver: ReceiverNullability,
+    nullsafe: bool,
+    object: &Expression<'_>,
+) {
+    if receiver == ReceiverNullability::Never || !(nullsafe || chain_has_nullsafe(object)) {
+        return;
+    }
+    if receiver == ReceiverNullability::Always {
+        *result = vec![ResolvedType::from_type_string(PhpType::null())];
+        return;
+    }
+    if result.is_empty() || result.iter().any(|rt| rt.type_string.accepts_null()) {
+        return;
+    }
+    // A lone entry carries the `null` in its own type, the way a `?Foo`
+    // return does, so narrowing that rules the class in rules it out.
+    if let [only] = result.as_mut_slice() {
+        only.type_string = std::mem::replace(&mut only.type_string, PhpType::null()).or_null();
+        return;
+    }
+    result.push(ResolvedType::from_type_string(PhpType::null()));
+}
+
 /// Apply unary `+` or `-` to an already-resolved numeric type.
 ///
 /// Exact literal members remain exact; negating a literal `PHP_INT_MIN`
@@ -957,6 +1039,7 @@ struct ChainLink<'b> {
     object: &'b Expression<'b>,
     method: &'b ClassLikeMemberSelector<'b>,
     argument_list: &'b ArgumentList<'b>,
+    nullsafe: bool,
 }
 
 /// Resolve a method call, walking its receiver spine iteratively.
@@ -990,12 +1073,14 @@ fn resolve_method_chain<'b>(
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
+                nullsafe: false,
             },
             Expression::Call(Call::NullSafeMethod(call)) => ChainLink {
                 call: peeled,
                 object: call.object,
                 method: &call.method,
                 argument_list: &call.argument_list,
+                nullsafe: true,
             },
             // The base of the spine.  It is left to the innermost link,
             // which knows how to read it as a receiver.
@@ -1007,14 +1092,18 @@ fn resolve_method_chain<'b>(
 
     let mut receiver: Option<MethodReceiver> = None;
     for link in links.iter().rev() {
+        let (owners, receiver_resolved) =
+            receiver.unwrap_or_else(|| calls::resolve_method_receiver(link.object, ctx));
+        let nullability = ReceiverNullability::of(&receiver_resolved);
         let mut resolved = resolve_method_call_on_receiver(
             link.object,
             link.method,
             link.argument_list,
-            receiver,
+            Some((owners, receiver_resolved)),
             ctx,
         );
         calls::finish_return_constant_operands(&mut resolved, ctx);
+        apply_nullsafe_short_circuit(&mut resolved, nullability, link.nullsafe, link.object);
         // A check written on the call itself (`if ($h->get() instanceof
         // Foo)`, `if ($this->option('from') !== null)`) is keyed under the
         // call's own text, so a later occurrence of that text reads the

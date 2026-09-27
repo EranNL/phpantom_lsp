@@ -288,8 +288,8 @@ class Chain
 	public function doFoo(): void
 	{
 		assertType('int', $this->baz);
-		assertType('int|null', $this->find()?->baz); // SKIP: a nullsafe access does not add null for a nullable receiver
-		assertType('int|null', $this->findImpure()?->baz); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('int|null', $this->find()?->baz);
+		assertType('int|null', $this->findImpure()?->baz);
 	}
 
 	public function doBar(): void

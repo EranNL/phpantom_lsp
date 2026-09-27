@@ -1637,7 +1637,7 @@ pub(super) type MethodReceiver = (Vec<Arc<ClassInfo>>, Vec<ResolvedType>);
 /// variable pipeline (honouring `match(true)` arm narrowing), and anything
 /// else — `(new Factory())`, `getService()`, a chain link — by resolving the
 /// expression.
-fn resolve_method_receiver<'b>(
+pub(super) fn resolve_method_receiver<'b>(
     object: &'b Expression<'b>,
     ctx: &VarResolutionCtx<'_>,
 ) -> MethodReceiver {

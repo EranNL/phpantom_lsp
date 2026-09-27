@@ -124,7 +124,8 @@ function probe(array $names, array $users, array $bare): void {
 }
 
 /// The element-extracting family has the same scalar blind spot:
-/// `array_pop(list<string>)` is a `string`, not `mixed`.
+/// `array_pop(list<string>)` is a `string`, not `mixed`.  The `null` or
+/// `false` an empty array gives stays alongside it.
 #[test]
 fn element_extractors_keep_scalar_elements() {
     let content = r#"<?php
@@ -143,10 +144,50 @@ function probe(array $names, array $users): void {
     assert_assigned_types(
         content,
         &[
-            ("$popped", "string"),
-            ("$shifted", "string"),
-            ("$cursor", "string"),
-            ("$object", "User"),
+            ("$popped", "string|null"),
+            ("$shifted", "string|null"),
+            ("$cursor", "string|false"),
+            ("$object", "User|null"),
+        ],
+    );
+}
+
+/// An element function hands back `null` or `false` when the array has no
+/// entry to give, so the sentinel is dropped only for an array that is
+/// provably non-empty.  `next()`, `prev()` and `array_find()` can miss on
+/// any array, so they always keep it.
+#[test]
+fn element_extractors_add_the_sentinel_an_empty_array_gives() {
+    let content = r#"<?php
+class User {}
+/**
+ * @param list<User> $users
+ * @param non-empty-list<User> $some
+ */
+function probe(array $users, array $some): void {
+    $first = reset($users);
+    $last = end($some);
+    $popped = array_pop($some);
+    $none = array_shift([]);
+    $after = next($some);
+    $found = array_find($some, fn (User $u) => true);
+    $pieces = explode('/', 'a/b');
+    $tail = end($pieces);
+    $trimmed = explode('/', 'a/b', -1);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "User|false"),
+            ("$last", "User"),
+            ("$popped", "User"),
+            ("$none", "null"),
+            ("$after", "User|false"),
+            ("$found", "User|null"),
+            ("$pieces", "non-empty-list<string>"),
+            ("$tail", "string"),
+            ("$trimmed", "list<string>"),
         ],
     );
 }
@@ -641,7 +682,7 @@ function probe(string $contents, int $start): void {
     assert_assigned_types(
         content,
         &[
-            ("$offsets", "array<int, string>"),
+            ("$offsets", "non-empty-array<int, string>"),
             ("$doubled", "non-empty-array<int, 'a'|'b'>"),
             ("$counted", "non-empty-array<int, 'c'>"),
         ],
@@ -669,7 +710,7 @@ function probe(array $counts, array $users): void {
         content,
         &[
             ("$total", "int"),
-            ("$last", "User"),
+            ("$last", "User|null"),
             ("$kept", "array<int, User>"),
         ],
     );

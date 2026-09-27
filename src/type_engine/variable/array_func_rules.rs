@@ -186,6 +186,24 @@ pub(in crate::type_engine) fn array_func_raw_type(
         return range_type(args);
     }
 
+    // Splitting a string always leaves at least one piece, so the pointer
+    // idiom `end(explode('/', $path))` is a `string`.  Only a negative
+    // `$limit`, which drops pieces from the end, can leave none; an empty
+    // separator throws rather than returning.  Mirrors PHPStan's
+    // `ExplodeFunctionDynamicReturnTypeExtension`.
+    if func_name.eq_ignore_ascii_case("explode") {
+        let keeps_all = !args.has_arg(2)
+            || args
+                .arg_raw_type(2)
+                .is_some_and(|limit| limit.is_subtype_of(&PhpType::parse("int<0, max>")));
+        let pieces = PhpType::string();
+        return Some(if keeps_all {
+            PhpType::generic("non-empty-list", vec![pieces])
+        } else {
+            PhpType::list(pieces)
+        });
+    }
+
     // array_map: callback is first arg, array is second.
     // The callback's return type determines the output element type.
     if func_name.eq_ignore_ascii_case("array_map") {
@@ -246,7 +264,8 @@ pub(in crate::type_engine) fn array_func_element_type(
         // A scalar element is the honest answer for `array_pop(list<string>)`
         // just as `User` is for `list<User>`, so the element type is read
         // without `skip_scalar`.
-        return args.arg_raw_type(0)?.iterable_element_type();
+        let raw = args.arg_raw_type(0)?;
+        return element_or_sentinel(func_name, &raw);
     }
 
     // `array_sum`/`array_product` are declared `int|float` because the
@@ -317,6 +336,37 @@ pub(in crate::type_engine) fn array_func_element_type(
     }
 
     None
+}
+
+/// What an element function hands back for `raw`: an element, or the
+/// `false` / `null` it returns when there is no element to give.
+///
+/// The pointer readers answer `false` and the removers and finders answer
+/// `null`.  `reset()`, `end()`, `current()` and the removers only miss on an
+/// empty array, so an argument that proves it has entries rules the sentinel
+/// out; `next()` and `prev()` can step off either end of any array, and
+/// `array_find()` can match nothing, so they always keep it.
+fn element_or_sentinel(func_name: &str, raw: &PhpType) -> Option<PhpType> {
+    let (sentinel, always) = match func_name.to_ascii_lowercase().as_str() {
+        "reset" | "end" | "current" => (PhpType::false_(), false),
+        "next" | "prev" => (PhpType::false_(), true),
+        "array_find" => (PhpType::null(), true),
+        _ => (PhpType::null(), false),
+    };
+    if matches!(raw.kind(), TypeKind::ArrayShape(_) | TypeKind::ListShape(_))
+        && raw
+            .shape_entries()
+            .is_some_and(|entries| entries.is_empty())
+    {
+        return Some(sentinel);
+    }
+    let element = raw.iterable_element_type()?;
+    if element.is_mixed() || (!always && raw.is_provably_non_empty()) {
+        return Some(element);
+    }
+    let mut members: Vec<PhpType> = element.union_members().into_iter().cloned().collect();
+    members.push(sentinel);
+    Some(PhpType::union(members))
 }
 
 /// The function a callable string names (`'intval'`, `"\\strlen"`), with

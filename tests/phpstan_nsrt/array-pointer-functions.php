@@ -35,18 +35,18 @@ class Foo
 			$secondConditionalArray[] = 'baz';
 		}
 		assertType('mixed', reset());
-		assertType('stdClass|false', reset($generalArray)); // SKIP: reset()/end() drop the false an empty array returns
+		assertType('stdClass|false', reset($generalArray));
 		assertType('mixed', reset($somethingElse));
-		assertType('false', reset($emptyConstantArray)); // SKIP: reset()/end() drop the false an empty array returns
+		assertType('false', reset($emptyConstantArray));
 		assertType('1|2', reset($constantArray));
 		assertType('\'bar\'|\'baz\'|\'foo\'', reset($conditionalArray));
 		assertType('0|1|2', reset($constantArrayOptionalKeys1));
 		assertType('0|1|2', reset($constantArrayOptionalKeys2));
 		assertType('0|1|2', reset($constantArrayOptionalKeys3));
 		assertType('mixed', end());
-		assertType('stdClass|false', end($generalArray)); // SKIP: reset()/end() drop the false an empty array returns
+		assertType('stdClass|false', end($generalArray));
 		assertType('mixed', end($somethingElse));
-		assertType('false', end($emptyConstantArray)); // SKIP: reset()/end() drop the false an empty array returns
+		assertType('false', end($emptyConstantArray)); // SKIP: a pointer function passed an empty array literal widens it to `array|object`
 		assertType('1|2', end($constantArray));
 		assertType('\'bar\'|\'baz\'|\'foo\'', end($secondConditionalArray));
 		assertType('0|1|2', end($constantArrayOptionalKeys1));

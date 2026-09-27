@@ -163,6 +163,31 @@ function f(): void {{
     );
 }
 
+/// A chain that passes an `instanceof` check held an object, so its
+/// receivers were not null either.
+#[test]
+fn nullsafe_instanceof_guard_narrows_the_receiver() {
+    let backend = create_test_backend();
+    let uri = "file:///nullsafe_instanceof.php";
+    let content = r#"<?php
+class Journey {}
+class Tier { public ?Journey $journey = null; }
+function f(?Tier $tier): void {
+    if (!$tier?->journey instanceof Journey) {
+        return;
+    }
+    $tier; // <-- here
+}
+"#;
+
+    let text = hover_marked(&backend, uri, content);
+    assert!(text.contains("Tier"), "expected Tier, got: {text}");
+    assert!(
+        !text.contains("null"),
+        "the receiver cannot be null past the guard, got: {text}"
+    );
+}
+
 /// The else branch gets no such proof — a null receiver is exactly one of
 /// the ways the check fails, so the declared type must survive intact.
 #[test]

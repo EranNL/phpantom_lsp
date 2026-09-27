@@ -17,7 +17,10 @@ use crate::types::{ClassInfo, ResolvedType};
 
 use crate::type_engine::resolver::VarResolutionCtx;
 
-use super::{resolve_rhs_expression, resolved_type_with_lookup};
+use super::{
+    ReceiverNullability, apply_nullsafe_short_circuit, resolve_rhs_expression,
+    resolved_type_with_lookup,
+};
 
 /// Resolve property access: `$this->prop`, `$obj->prop`, `$obj?->prop`.
 pub(super) fn resolve_rhs_property_access(
@@ -424,7 +427,11 @@ pub(super) fn resolve_rhs_property_access(
                 Expression::Variable(Variable::Direct(dv)) if dv.name == b"$this"
             );
             let mut receiver_open = receiver_is_this;
+            let mut nullability = ReceiverNullability::Never;
             let mut owner_classes_of = |resolved: Vec<ResolvedType>| {
+                if !resolved.is_empty() {
+                    nullability = ReceiverNullability::of(&resolved);
+                }
                 receiver_open |= resolved.iter().any(|rt| {
                     matches!(
                         rt.type_string.kind(),
@@ -551,6 +558,12 @@ pub(super) fn resolve_rhs_property_access(
                     }
                 }
             }
+            apply_nullsafe_short_circuit(
+                &mut all_resolved,
+                nullability,
+                matches!(access, Access::NullSafeProperty(_)),
+                obj,
+            );
             if !all_resolved.is_empty() {
                 return all_resolved;
             }

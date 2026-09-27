@@ -363,6 +363,16 @@ impl PhpType {
             return matches!(sup.to_ascii_lowercase().as_str(), "array" | "iterable");
         }
 
+        // Generic array-like <: `T[]`, which promises nothing about its
+        // keys: `non-empty-array<int, Foo> <: Foo[]` when the values fit.
+        if let TypeKind::Generic(g) = self.kind()
+            && is_array_like_name(&g.name)
+            && let TypeKind::Array(inner_sup) = supertype.kind()
+            && let Some(val) = g.args.last()
+        {
+            return val.is_subtype_of(inner_sup);
+        }
+
         // ── class-string / interface-string subtyping ───────────────
         //
         // Both name a PHP symbol, so every string refinement the named

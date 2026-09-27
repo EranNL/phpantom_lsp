@@ -11156,8 +11156,8 @@ function test(FormItem $item): void {
     let hover = hover_at(&backend, uri, content, 12, 4).expect("expected hover");
     let text = hover_text(&hover);
     assert!(
-        text.contains("string"),
-        "should contain string, got: {}",
+        text.contains("?string") || text.contains("string|null"),
+        "should be a nullable string, got: {}",
         text
     );
 }

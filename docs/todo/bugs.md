@@ -26,22 +26,6 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B481. An element function drops the `false` or `null` an empty array gives
-**Impact: Medium · Complexity: Medium**
-
-```php
-/** @param \stdClass[] $objects */
-function f(array $objects): void {
-    reset($objects);     // should be stdClass|false, is stdClass
-    reset([]);           // should be false, is mixed|false
-    array_shift($objects); // should be stdClass|null, is stdClass
-}
-```
-
-`reset()`, `end()`, `current()`, `next()`, `prev()` return `false` and `array_pop()`, `array_shift()`, `array_first()`, `array_last()` return `null` when the array has no entries. `array_func_element_type` answers the element type alone, so the sentinel is only right for an array that is provably non-empty (a literal with entries). Adding it back will surface new argument-type diagnostics where a result is passed on unchecked, so re-run `analyze` on the sample projects before and after.
-
-Found porting PHPStan's `nsrt/array-pointer-functions.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
 ### B482. Key functions widen the literal keys of an array literal
 **Impact: Low · Complexity: Low-Medium**
 
@@ -109,6 +93,20 @@ strlen($this->foo); // should be 0, is int<0, max>
 A literal argument has a known length, the same way the other scalar folds read one.
 
 Found porting PHPStan's `nsrt/bug-5129.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+
+### B506. A pointer function passed an empty array widens it to `array|object`
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+$empty = [];
+reset($empty); // false (correct)
+$empty;        // should be array{}, is object|array
+end($empty);   // should be false, is mixed|false
+```
+
+`reset()`, `end()`, `next()` and `prev()` take their array by reference only to move its internal pointer, so the value is the same after the call. The by-reference seeding in `seed_pass_by_ref_primitives` drops an empty shape on purpose (a `preg_match_all()` out-parameter really is overwritten) and falls back to the stub's `array|object`. A non-empty shape survives only because it is a subtype of the hint. The pointer functions need to be marked as leaving their argument's value alone.
+
+Found porting PHPStan's `nsrt/array-pointer-functions.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 ## Reachability
 
@@ -226,26 +224,26 @@ public function doFoo() {
 
 Found porting PHPStan's `nsrt/remember-readonly-constructor-narrowed.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
+### B507. An assertion on a value typed as a union of classes and `null` leaves the `null`
+**Impact: Low-Medium · Complexity: Low-Medium**
+
+```php
+class A { /** @return A|B|null */ public function abn() {} }
+/** @psalm-assert A $v */
+function assertA($v): void {}
+
+$x = $a->abn();
+assertA($x);
+$x; // should be A, is A|null
+```
+
+The value resolves to one entry per class plus a separate `null` entry, and the assertion narrows the class entries without dropping the `null` one. A single class (`?A`) carries the `null` inside its own entry and narrows correctly. PHPUnit's `assertInstanceOf()` goes through the same path.
+
 ## Arithmetic
 
 No outstanding items.
 
 ## Symbol resolution
-
-### B494. A nullsafe access does not add `null` for a nullable receiver
-**Impact: Medium · Complexity: Low-Medium**
-
-```php
-function f(?\Exception $e) {
-    $e?->getMessage(); // should be string|null, is string
-}
-$null = null;
-$null?->foo;           // should be null, has no type
-```
-
-A `?->` call or property read short-circuits to `null` when its receiver is null, so its type is the member's type plus `null` whenever the receiver may be null, and `null` alone when it always is. Like B481 this will surface new argument-type diagnostics, so re-run `analyze` on the sample projects.
-
-Found porting PHPStan's `nsrt/nullsafe.php` and `nsrt/bug-4757.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
 
 ### B495. A method on an intersection returns the union of its members' return types
 **Impact: Low · Complexity: Medium**

@@ -13,11 +13,11 @@ class Foo
 
 	public function doFoo(?\Exception $e)
 	{
-		assertType('string|null', $e?->getMessage()); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('string|null', $e?->getMessage());
 		assertType('Exception|null', $e);
 
 		assertType('Throwable|null', $e?->getPrevious());
-		assertType('string|null', $e?->getPrevious()?->getMessage()); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('string|null', $e?->getPrevious()?->getMessage());
 
 		$e?->getMessage(assertType('Exception', $e)); // SKIP: the receiver of a nullsafe call is not narrowed to non-null inside its arguments
 	}
@@ -25,10 +25,10 @@ class Foo
 	public function doBar(?\ReflectionClass $r)
 	{
 		assertType('class-string<object>', $r->name);
-		assertType('class-string<object>|null', $r?->name); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('class-string<object>|null', $r?->name);
 
-		assertType('Nullsafe\Foo|null', $this->nullableSelf?->self); // SKIP: a nullsafe access does not add null for a nullable receiver
-		assertType('Nullsafe\Foo|null', $this->nullableSelf?->self->self); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('Nullsafe\Foo|null', $this->nullableSelf?->self);
+		assertType('Nullsafe\Foo|null', $this->nullableSelf?->self->self);
 	}
 
 	public function doBaz(?self $self)
@@ -103,8 +103,8 @@ class Foo
 	public function doNull(): void
 	{
 		$null = null;
-		assertType('null', $null?->foo); // SKIP: a nullsafe access does not add null for a nullable receiver
-		assertType('null', $null?->doFoo()); // SKIP: a nullsafe access does not add null for a nullable receiver
+		assertType('null', $null?->foo);
+		assertType('null', $null?->doFoo());
 	}
 
 }
