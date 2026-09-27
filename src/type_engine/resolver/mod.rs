@@ -460,7 +460,12 @@ fn resolve_target_classes_expr_inner(
                     // the global scope, so a same-namespace class must win
                     // over a global class of the same short name.
                     let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-                    let fqn = crate::util::resolve_source_class_name(class, ns, class_loader);
+                    let fqn = crate::util::resolve_source_class_name(
+                        class,
+                        ns,
+                        all_classes,
+                        class_loader,
+                    );
                     class_loader(&fqn).into_iter().collect()
                 }
             };
@@ -537,7 +542,7 @@ fn resolve_target_classes_expr_inner(
             // global scope, so a same-namespace class must win over a
             // global stub of the same short name.
             let ns = current_class.and_then(|c| c.file_namespace.as_deref());
-            let fqn = crate::util::resolve_source_class_name(name, ns, class_loader);
+            let fqn = crate::util::resolve_source_class_name(name, ns, all_classes, class_loader);
             class_loader(&fqn)
                 .map(ResolvedType::from_arc)
                 .into_iter()

@@ -1082,7 +1082,12 @@ pub(crate) fn constant_operand_shape(name: &str, ctx: &ResolutionCtx<'_>) -> Opt
                 crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
                     .unwrap_or_else(|| {
                         let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                        crate::util::resolve_source_class_name(class_part, ns, ctx.class_loader)
+                        crate::util::resolve_source_class_name(
+                            class_part,
+                            ns,
+                            ctx.all_classes,
+                            ctx.class_loader,
+                        )
                     });
             let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
                 .cloned()
@@ -1257,7 +1262,12 @@ fn enum_backing_values(operand: &PhpType, ctx: &ResolutionCtx<'_>) -> Option<Php
     let class_name = crate::class_lookup::resolve_class_keyword(class_part, ctx.current_class)
         .unwrap_or_else(|| {
             let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-            crate::util::resolve_source_class_name(class_part, ns, ctx.class_loader)
+            crate::util::resolve_source_class_name(
+                class_part,
+                ns,
+                ctx.all_classes,
+                ctx.class_loader,
+            )
         });
     let class = crate::class_lookup::find_class_by_name(ctx.all_classes, &class_name)
         .cloned()

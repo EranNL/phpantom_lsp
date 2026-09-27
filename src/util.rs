@@ -141,12 +141,32 @@ pub(crate) fn resolve_name_via_loader(
 ///
 /// An explicit `use` import still wins: it resolves to a namespaced or
 /// aliased class whose FQN differs from the bare name, which this helper
-/// leaves untouched.
+/// leaves untouched.  The one exception is a class the file itself
+/// declares in `namespace` (`local_classes` is the file's class list):
+/// PHP refuses to compile an import that collides with a class declared
+/// in the same namespace block, so an unqualified name that matches one
+/// always means it.  This is what keeps a file with several `namespace`
+/// blocks from resolving a short name in a later block to the
+/// same-named class of the first, which is the namespace the file-wide
+/// class loader was built for.
 pub(crate) fn resolve_source_class_name(
     name: &str,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> String {
+    if !name.contains('\\')
+        && let Some(local) = local_classes.iter().find(|c| {
+            c.name.eq_ignore_ascii_case(name)
+                && match (c.file_namespace.as_deref(), namespace) {
+                    (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+                    (None, None) => true,
+                    _ => false,
+                }
+        })
+    {
+        return local.fqn().to_string();
+    }
     let resolved = class_loader(name);
     // Only a relative name inside a namespace can be shadowed by a global
     // class of the same path; a leading `\` is an explicit global reference.
@@ -279,10 +299,11 @@ fn fill_generic_type_defaults(
 pub(crate) fn resolve_source_php_type_names(
     ty: &crate::php_type::PhpType,
     namespace: Option<&str>,
+    local_classes: &[Arc<crate::types::ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<crate::types::ClassInfo>>,
 ) -> crate::php_type::PhpType {
     let resolved = ty.resolve_names(&|name| {
-        let resolved = resolve_source_class_name(name, namespace, class_loader);
+        let resolved = resolve_source_class_name(name, namespace, local_classes, class_loader);
         if resolved == name.trim_start_matches('\\') {
             return name.to_string();
         }

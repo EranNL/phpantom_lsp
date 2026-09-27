@@ -4829,3 +4829,78 @@ function f(string $n): array {
         "got: {diags:?}"
     );
 }
+
+// ─── Multi-namespace files: short names resolve in their own block ─────────
+
+/// A later `namespace` block that reuses an earlier block's short class
+/// names must resolve them against itself, both for `new` and for a
+/// closure literal's native parameter and return hints.
+#[test]
+fn short_names_in_a_later_namespace_block_resolve_against_that_block() {
+    let php = r#"<?php
+namespace First {
+    class A {}
+    class C {}
+}
+
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    function make(): C {
+        return new C;
+    }
+
+    /**
+     * @return \Closure(C2):A
+     */
+    function wrap(): \Closure {
+        return function (C $x): A {
+            return new A;
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the enclosing namespace block, got: {diags:?}"
+    );
+}
+
+/// A line comment above each `namespace` block (the layout of the ported
+/// Psalm suites) must not hide the block's declaration, or everything in
+/// it resolves against the block before.
+#[test]
+fn a_comment_above_a_namespace_block_does_not_hide_it() {
+    let php = r#"<?php
+// Test: first
+namespace First {
+    class A {}
+    class C {}
+}
+
+// Test: second
+namespace Second {
+    class A {}
+    class C {}
+    class C2 extends C {}
+
+    /**
+     * @param \Closure(C):A $f
+     * @return \Closure(C2):A
+     */
+    function wrap(\Closure $f): \Closure {
+        return function (C $x) use ($f): A {
+            return $f($x);
+        };
+    }
+}
+"#;
+    let diags = collect(php);
+    assert!(
+        messages_with_code(&diags, "type_mismatch_return").is_empty(),
+        "Short names should resolve against the commented namespace block, got: {diags:?}"
+    );
+}

@@ -1062,6 +1062,7 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             let Some(class_name) = crate::class_lookup::class_expression_name(
                 sc.class,
                 ctx.current_class,
+                ctx.all_classes,
                 ctx.class_loader,
             ) else {
                 return;

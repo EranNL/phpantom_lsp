@@ -810,7 +810,12 @@ impl Backend {
         // scope, so a same-namespace class wins over a global stub
         // of the same short name.
         let ns = ctx.current_class.and_then(|c| c.file_namespace.as_deref());
-        let fqn = crate::util::resolve_source_class_name(class_name, ns, ctx.class_loader);
+        let fqn = crate::util::resolve_source_class_name(
+            class_name,
+            ns,
+            ctx.all_classes,
+            ctx.class_loader,
+        );
         let cls_arc = find_class_by_name(ctx.all_classes, class_name)
             .map(Arc::clone)
             .or_else(|| (ctx.class_loader)(&fqn));

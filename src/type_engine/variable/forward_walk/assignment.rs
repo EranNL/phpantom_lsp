@@ -545,6 +545,7 @@ pub(crate) fn resolve_type_to_resolved_types(
     let php_type = crate::util::resolve_source_php_type_names(
         marked.as_ref().unwrap_or(php_type),
         ctx.current_class.file_namespace.as_deref(),
+        ctx.all_classes,
         ctx.class_loader,
     );
     ctx.resolved_types_for(php_type)
@@ -1214,6 +1215,7 @@ pub(crate) fn resolve_rhs_with_scope<'b>(
         let class_name = crate::class_lookup::class_expression_name(
             cca.class,
             ctx.current_class,
+            ctx.all_classes,
             ctx.class_loader,
         )
         .filter(|name| !name.is_empty());

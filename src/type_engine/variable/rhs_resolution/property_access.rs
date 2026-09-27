@@ -109,6 +109,7 @@ pub(super) fn resolve_rhs_property_access(
         let target_classes = match crate::class_lookup::class_expression_name(
             cca.class,
             ctx.current_class,
+            ctx.all_classes,
             ctx.class_loader,
         ) {
             Some(class_name) => {
@@ -242,6 +243,7 @@ pub(super) fn resolve_rhs_property_access(
         let class_name = crate::class_lookup::class_expression_name(
             spa.class,
             ctx.current_class,
+            ctx.all_classes,
             ctx.class_loader,
         );
         let prop_name = match &spa.property {
@@ -318,6 +320,7 @@ pub(super) fn resolve_rhs_property_access(
                 && let Some(enum_name) = crate::class_lookup::class_expression_name(
                     cca.class,
                     ctx.current_class,
+                    ctx.all_classes,
                     class_loader,
                 )
                 && let Some(enum_cls) = class_loader(&enum_name)

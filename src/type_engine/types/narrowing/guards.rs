@@ -280,6 +280,9 @@ pub(in crate::type_engine) struct ExitCtx<'a> {
     /// Enclosing class, used for `$this->…`, `self::`, `static::` and
     /// `parent::` receivers and for namespace-relative name resolution.
     pub current_class: &'a ClassInfo,
+    /// The file's classes, so a name resolves to the one its own
+    /// namespace block declares.
+    pub all_classes: &'a [Arc<ClassInfo>],
     pub class_loader: &'a dyn Fn(&str) -> Option<Arc<ClassInfo>>,
     pub function_loader: FunctionLoaderFn<'a>,
     pub resolved_class_cache: Option<&'a crate::virtual_members::ResolvedClassCache>,
@@ -305,6 +308,7 @@ impl<'a> ExitCtx<'a> {
     ) -> Self {
         Self {
             current_class: ctx.current_class,
+            all_classes: ctx.all_classes,
             class_loader: ctx.class_loader,
             function_loader: ctx.loaders.function_loader,
             resolved_class_cache: ctx.resolved_class_cache,
@@ -414,6 +418,7 @@ fn expression_is_never_call(expr: &Expression<'_>, ctx: &ExitCtx<'_>) -> bool {
                 Expression::Identifier(ident) => crate::util::resolve_source_class_name(
                     bytes_to_str(ident.value()),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 ),
                 // `never` is the bottom type, so a child override can

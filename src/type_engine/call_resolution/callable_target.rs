@@ -649,7 +649,12 @@ impl Backend {
                 // over a global stub of the same short name.
                 let resolved_class_name = if resolved_class_name == *class_name {
                     let ns = rctx.current_class.and_then(|c| c.file_namespace.as_deref());
-                    crate::util::resolve_source_class_name(class_name, ns, &class_loader)
+                    crate::util::resolve_source_class_name(
+                        class_name,
+                        ns,
+                        rctx.all_classes,
+                        &class_loader,
+                    )
                 } else {
                     resolved_class_name
                 };

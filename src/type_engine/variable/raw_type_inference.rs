@@ -497,6 +497,7 @@ fn infer_element_type<'b>(
                 let fqn = crate::util::resolve_source_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))

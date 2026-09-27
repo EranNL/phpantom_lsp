@@ -313,12 +313,46 @@ fn is_namespace_statement(bytes: &[u8], pos: usize, len: usize) -> bool {
     // statement boundary or the opening tag.  A comment marker (`//`, `#`,
     // `*`) or a quote before the keyword means the match is inside prose or
     // a literal, which this check rejects.
-    let before = &bytes[..pos];
-    let Some(prev) = before.iter().rposition(|b| !b.is_ascii_whitespace()) else {
-        return true;
-    };
-    matches!(before[prev], b';' | b'{' | b'}' | b'>')
-        || (prev >= 4 && before[prev - 4..=prev].eq_ignore_ascii_case(b"<?php"))
+    //
+    // Comments may sit between that boundary and the keyword (a `// Test:`
+    // line above each block, a `/** … */` file header), so when the text
+    // right before the keyword is not a boundary, peel off a trailing
+    // comment and look again.
+    let mut before = &bytes[..pos];
+    loop {
+        let Some(prev) = before.iter().rposition(|b| !b.is_ascii_whitespace()) else {
+            return true;
+        };
+        if matches!(before[prev], b';' | b'{' | b'}' | b'>')
+            || (prev >= 4 && before[prev - 4..=prev].eq_ignore_ascii_case(b"<?php"))
+        {
+            return true;
+        }
+        let code = &before[..=prev];
+        if code.ends_with(b"*/") {
+            match memchr::memmem::rfind(&code[..code.len() - 2], b"/*") {
+                Some(open) => before = &code[..open],
+                None => return false,
+            }
+            continue;
+        }
+        // A line comment runs to the end of the line, so its marker is on
+        // the line the last non-blank byte is on.  Only a newline between
+        // it and the keyword puts the keyword outside the comment.
+        let line_start = code.iter().rposition(|&b| b == b'\n').map_or(0, |n| n + 1);
+        if !bytes[code.len()..pos].contains(&b'\n') {
+            return false;
+        }
+        let line = &code[line_start..];
+        let marker = line
+            .windows(2)
+            .rposition(|w| w == b"//" || (w[0] == b'#' && w[1] != b'['))
+            .or_else(|| (line.last() == Some(&b'#')).then(|| line.len() - 1));
+        match marker {
+            Some(m) => before = &code[..line_start + m],
+            None => return false,
+        }
+    }
 }
 
 /// Read the namespace name that follows the `namespace` keyword ending at

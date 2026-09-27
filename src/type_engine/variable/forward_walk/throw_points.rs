@@ -68,6 +68,7 @@ impl ThrowPoints {
             let catch_name = crate::util::resolve_source_class_name(
                 name,
                 ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
                 ctx.class_loader,
             );
             self.explicit
@@ -204,6 +205,7 @@ impl Collect<'_, '_> {
         crate::class_lookup::class_expression_name(
             expr,
             self.ctx.current_class,
+            self.ctx.all_classes,
             self.ctx.class_loader,
         )
     }

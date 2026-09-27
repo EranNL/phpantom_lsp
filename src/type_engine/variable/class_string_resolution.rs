@@ -41,6 +41,7 @@ fn push_class_string_target(name: &str, ctx: &VarResolutionCtx<'_>, results: &mu
     let fqn = crate::util::resolve_source_class_name(
         name,
         ctx.current_class.file_namespace.as_deref(),
+        ctx.all_classes,
         ctx.class_loader,
     );
     if let Some(cls) = (ctx.class_loader)(&fqn) {

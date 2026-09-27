@@ -45,12 +45,14 @@ pub(super) fn resolve_rhs_instantiation(
                 crate::util::resolve_source_class_name(
                     parent.as_str(),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 )
             }
             other => crate::util::resolve_source_class_name(
                 other,
                 ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
                 ctx.class_loader,
             ),
         };

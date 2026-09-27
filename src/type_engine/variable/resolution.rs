@@ -1740,6 +1740,7 @@ pub(crate) fn extract_native_type_from_rhs<'b>(
                 let fqn = crate::util::resolve_source_class_name(
                     &name,
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 );
                 Some(PhpType::named(atom(&fqn)))
@@ -2141,6 +2142,7 @@ fn try_resolve_static_method_params<'a>(
     let class_name = crate::class_lookup::class_expression_name(
         static_call.class,
         ctx.current_class,
+        ctx.all_classes,
         ctx.class_loader,
     )?;
 
@@ -2165,6 +2167,7 @@ fn try_resolve_constructor_params<'a>(
     let class_name = crate::class_lookup::class_expression_name(
         inst.class,
         ctx.current_class,
+        ctx.all_classes,
         ctx.class_loader,
     )?;
 

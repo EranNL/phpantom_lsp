@@ -525,6 +525,7 @@ pub(crate) fn infer_closure_literal_type(
                 let ty = crate::util::resolve_source_php_type_names(
                     &crate::parser::extract_hint_type(hint),
                     ctx.current_class.file_namespace.as_deref(),
+                    ctx.all_classes,
                     ctx.class_loader,
                 );
                 Some((name, ty))
@@ -559,6 +560,12 @@ pub(crate) fn infer_closure_literal_type(
         // `: Closure` on a closure whose body returns a closure with a
         // known signature).
         Some(declared) => {
+            let declared = crate::util::resolve_source_php_type_names(
+                &declared,
+                ctx.current_class.file_namespace.as_deref(),
+                ctx.all_classes,
+                ctx.class_loader,
+            );
             let narrowed = body_return().filter(|body| {
                 crate::class_lookup::is_subtype_of_typed(body, &declared, ctx.class_loader)
             });
@@ -639,6 +646,7 @@ fn declared_closure_params(
                     crate::util::resolve_source_php_type_names(
                         &crate::parser::extract_hint_type(hint),
                         ctx.current_class.file_namespace.as_deref(),
+                        ctx.all_classes,
                         ctx.class_loader,
                     )
                 })
@@ -2554,6 +2562,7 @@ pub(super) fn resolve_rhs_static_call(
         | Expression::Identifier(_) => crate::class_lookup::class_expression_name(
             static_call.class,
             ctx.current_class,
+            ctx.all_classes,
             ctx.class_loader,
         ),
         // ── `$var::method()` where `$var` holds a class-string ──

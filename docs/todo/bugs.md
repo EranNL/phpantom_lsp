@@ -45,54 +45,37 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B540. A closure's declared parameter/return classes resolve against the wrong namespace when short names repeat across the file
+### B541. A `use` import in one `namespace` block applies to every block in the file
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Medium**
 
 ```php
-namespace PsalmTest_closure_5 {
-    class A {}
-    class B {}
-    class C {}
+namespace X {
+    class Foo { public function onlyX(): void {} }
 }
-
-namespace PsalmTest_closure_6 {
-    class A {}
-    class B {}
-    class C {}
-    class C2 extends C {}
-
-    /**
-     * @param Closure(B):A $f
-     * @param Closure(C):B $g
-     * @return Closure(C2):A
-     */
-    function foo(Closure $f, Closure $g): Closure {
-        return function (C $x) use ($f, $g): A {
-            return $f($g($x));
-        };
-        // Return type Closure(PsalmTest_closure_5\C): PsalmTest_closure_5\A
-        // is incompatible with declared return type
-        // PsalmTest_closure_6\Closure(PsalmTest_closure_6\C2): PsalmTest_closure_6\A
-        //
-        // Should resolve C/A against PsalmTest_closure_6, the namespace the
-        // closure literal is actually written in.
-    }
+namespace A {
+    use X\Foo;
+    function a(): void { (new Foo)->onlyX(); }
+}
+namespace B {
+    // `Foo` here is `B\Foo`, which does not exist, so this should be
+    // reported as an unknown class. Instead it resolves to `X\Foo`
+    // through block A's import and nothing is reported.
+    function b(): void { (new Foo)->onlyX(); }
 }
 ```
 
-The inner closure's native `C`/`A` hints get qualified against
-`PsalmTest_closure_5`, an unrelated namespace earlier in the same file that
-happens to declare classes with the same short names, instead of
-`PsalmTest_closure_6`, the namespace the closure literal is lexically in.
-The same file shows it corrupting `type_mismatch_argument` diagnostics too
-(lines 107-108, 134-136 of the file below), always pulling from
-`PsalmTest_closure_5` regardless of which later namespace the mismatched
-call actually lives in.
-
-Found while fixing B536, in `tests/psalm_assertions/closure.php`
-(`returnsTypedClosureWithSubclassParam` and later namespaces in the same
-file). Not yet isolated to a root cause.
+The parser collects a file's imports into a single use-map
+(`file_imports`), and the class loader that diagnostics and the type engine
+build (`Backend::class_loader`) reads it for every offset in the file, so an
+import is in force outside the block that declares it. The loader is also
+built for the file's *first* namespace, which `resolve_source_class_name`
+now corrects for classes the file itself declares, but a name that should
+fall through to the current block's namespace in another file still
+qualifies against the first block. Fixing it means making imports and the
+namespace per-block wherever a loader resolves a source name (the
+offset-aware `resolved_names` from mago-names already has the right answer
+for any identifier in the AST).
 
 ## Array types
 

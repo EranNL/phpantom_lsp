@@ -165,6 +165,7 @@ pub(crate) fn find_class_by_name<'a>(
 pub(crate) fn class_expression_name(
     expr: &mago_syntax::cst::Expression<'_>,
     current_class: &ClassInfo,
+    local_classes: &[Arc<ClassInfo>],
     class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
 ) -> Option<String> {
     use mago_syntax::cst::Expression;
@@ -172,6 +173,7 @@ pub(crate) fn class_expression_name(
         Expression::Identifier(ident) => Some(crate::util::resolve_source_class_name(
             crate::atom::bytes_to_str(ident.value()),
             current_class.file_namespace.as_deref(),
+            local_classes,
             class_loader,
         )),
         Expression::Self_(_) | Expression::Static(_) => Some(current_class.name.to_string()),
