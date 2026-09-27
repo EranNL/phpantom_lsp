@@ -245,30 +245,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B495. A method on an intersection returns the union of its members' return types
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @var WithFoo&WithFooAndBarInterface $x */
-$x->doFoo(); // should be Foo&AnotherFoo, is Foo|AnotherFoo
-```
-
-A value that is both types satisfies both declarations, so the result is both return types at once. A union is right for a union receiver, not an intersection.
-
-Found porting PHPStan's `nsrt/union-intersection.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B496. A static call on an intersection-typed variable or on a property has no type
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-/** @var WithFoo&SomeInterface $foo */
-$foo::doStaticFoo();         // should be Foo, has no type
-$this->union::doStaticFoo(); // should be Foo|AnotherFoo, has no type
-```
-
-`resolve_rhs_static_call` reads the class from a variable's first `base_name()`, which an intersection does not have, and does not read it from any other expression.
-
-Found porting PHPStan's `nsrt/union-intersection.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Array types
 

@@ -118,7 +118,7 @@ class Ipsum extends Dolor
 					assertType('UnionIntersection\Bar', $this->union->doBar());
 					assertType('UnionIntersection\Foo', $foo->doFoo());
 					assertType('*ERROR*', $foo->doBar());
-					assertType('UnionIntersection\AnotherFoo&UnionIntersection\Foo', $foobar->doFoo()); // SKIP: a method both members of an intersection declare returns the union of their return types
+					assertType('UnionIntersection\AnotherFoo&UnionIntersection\Foo', $foobar->doFoo());
 					assertType('UnionIntersection\Bar', $foobar->doBar());
 					assertType('1', $this->union::FOO_CONSTANT);
 					assertType('1', $this->union::BAR_CONSTANT);
@@ -129,12 +129,12 @@ class Ipsum extends Dolor
 					assertType('\'foo\'', self::IPSUM_CONSTANT);
 					// PHPantom spells a list-shaped constant array as list{…}.
 					assertType('list{1, 2, 3}', parent::PARENT_CONSTANT);
-					assertType('UnionIntersection\Foo', $foo::doStaticFoo()); // SKIP: a static call on an intersection-typed variable or a property has no type
+					assertType('UnionIntersection\Foo', $foo::doStaticFoo());
 					assertType('*ERROR*', $foo::doStaticBar());
-					assertType('UnionIntersection\AnotherFoo&UnionIntersection\Foo', $foobar::doStaticFoo()); // SKIP: a static call on an intersection-typed variable has no type
-					assertType('UnionIntersection\Bar', $foobar::doStaticBar()); // SKIP: a static call on an intersection-typed variable or a property has no type
-					assertType('UnionIntersection\AnotherFoo|UnionIntersection\Foo', $this->union::doStaticFoo()); // SKIP: a static call on an intersection-typed variable or a property has no type
-					assertType('UnionIntersection\Bar', $this->union::doStaticBar()); // SKIP: a static call on an intersection-typed variable or a property has no type
+					assertType('UnionIntersection\AnotherFoo&UnionIntersection\Foo', $foobar::doStaticFoo());
+					assertType('UnionIntersection\Bar', $foobar::doStaticBar());
+					assertType('UnionIntersection\AnotherFoo|UnionIntersection\Foo', $this->union::doStaticFoo());
+					assertType('UnionIntersection\Bar', $this->union::doStaticBar());
 					// PHPantom keeps the class a union with object names, since completion offers its members.
 					assertType('UnionIntersection\WithFoo|object', $this->objectUnion);
 					assertType('UnionIntersection\SomeInterface', $object);

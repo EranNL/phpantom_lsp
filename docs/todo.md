@@ -106,7 +106,6 @@ unlikely to move the needle for most users.
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
 | B484 | [`array_merge()` of array literals does not produce the merged shape](todo/bugs.md#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape) | Low-Medium | Medium |
-| B496 | [A static call on an intersection-typed variable or on a property has no type](todo/bugs.md#b496-a-static-call-on-an-intersection-typed-variable-or-on-a-property-has-no-type) | Low-Medium | Medium |
 | B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
 | B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
 | B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
@@ -122,7 +121,6 @@ unlikely to move the needle for most users.
 | B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
 | B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |
 | B492 | [What the constructor proves about a readonly property of a readonly property is not remembered](todo/bugs.md#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered) | Low | Medium |
-| B495 | [A method on an intersection returns the union of its members' return types](todo/bugs.md#b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types) | Low | Medium |
 | B505 | [A template bound through another template's bound from an empty array does not bind `never`](todo/bugs.md#b505-a-template-bound-through-another-templates-bound-from-an-empty-array-does-not-bind-never) | Low | Medium |
 | B500 | [A key template bound from an array that names only its value type binds the whole array](todo/bugs.md#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array) | Low | Medium |
 | B501 | [An assertion on `$this` that names a generic class loses the template arguments](todo/bugs.md#b501-an-assertion-on-this-that-names-a-generic-class-loses-the-template-arguments) | Low | Medium |

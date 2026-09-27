@@ -1714,6 +1714,22 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     receiver: Option<MethodReceiver>,
     ctx: &VarResolutionCtx<'_>,
 ) -> Vec<ResolvedType> {
+    resolve_member_call_on_receiver(object, method, argument_list, receiver, false, ctx)
+}
+
+/// [`resolve_method_call_on_receiver`] for either call form.
+///
+/// `is_static` marks `$obj::method()`, which PHP dispatches on the class of
+/// the object `$obj` holds: every rule of an instance call applies, except
+/// that a missing method falls back to `__callStatic` rather than `__call`.
+fn resolve_member_call_on_receiver<'b>(
+    object: &'b Expression<'b>,
+    method: &'b ClassLikeMemberSelector<'b>,
+    argument_list: &'b ArgumentList<'b>,
+    receiver: Option<MethodReceiver>,
+    is_static: bool,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
     let method_name = match method {
         ClassLikeMemberSelector::Identifier(ident) => bytes_to_str(ident.value).to_string(),
         // Variable method name (`$obj->$method()`) — see
@@ -1871,6 +1887,14 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
 
     let is_union = owner_classes.len() > 1;
     let mut union_results: Vec<ResolvedType> = Vec::new();
+    // A receiver that is every one of its classes at once satisfies each of
+    // their declarations, so what they return is intersected, not unioned.
+    let receiver_is_intersection = is_union
+        && !receiver_resolved.is_empty()
+        && receiver_resolved
+            .iter()
+            .all(|rt| matches!(rt.type_string.kind(), TypeKind::Intersection(_)));
+    let mut intersected_results: Vec<Vec<ResolvedType>> = Vec::new();
 
     for (idx, owner) in owner_classes.iter().enumerate() {
         // Build class-level template substitutions from the receiver's
@@ -1915,7 +1939,7 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
             &method_name,
             argument_list,
             ctx,
-            false,
+            is_static,
             &template_subs,
             &self_replace,
         );
@@ -1929,7 +1953,16 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
         if !is_union {
             return owner_results;
         }
+        if receiver_is_intersection {
+            if !owner_results.is_empty() {
+                intersected_results.push(owner_results);
+            }
+            continue;
+        }
         ResolvedType::extend_unique(&mut union_results, owner_results);
+    }
+    if receiver_is_intersection {
+        return intersect_owner_results(intersected_results);
     }
 
     // For intersection types, filter out `mixed` when concrete types exist.
@@ -1946,6 +1979,63 @@ pub(super) fn resolve_method_call_on_receiver<'b>(
     }
 
     union_results
+}
+
+/// Combine what each member of an intersection receiver returns for the same
+/// call into one intersection type.
+///
+/// Each entry of `per_owner` is one member's result.  A member returning
+/// `mixed` adds nothing a sibling's concrete type does not already say.
+/// When every remaining result is an object type the members are intersected
+/// (`Foo&AnotherFoo`), with each resulting entry carrying the whole
+/// intersection the way an intersection-typed variable does.  Anything else
+/// (a scalar, a union, a nullable) is joined as a union.
+fn intersect_owner_results(mut per_owner: Vec<Vec<ResolvedType>>) -> Vec<ResolvedType> {
+    let is_mixed = |group: &[ResolvedType]| group.iter().all(|rt| rt.type_string.is_mixed());
+    if per_owner.iter().any(|group| !is_mixed(group)) {
+        per_owner.retain(|group| !is_mixed(group));
+    }
+    if per_owner.len() < 2 {
+        return per_owner.pop().unwrap_or_default();
+    }
+
+    let mut members: Vec<PhpType> = Vec::new();
+    let mut all_objects = true;
+    for group in &per_owner {
+        let joined = ResolvedType::types_joined(group);
+        match joined.kind() {
+            TypeKind::Intersection(parts) => {
+                for part in parts.iter() {
+                    if !members.contains(part) {
+                        members.push(part.clone());
+                    }
+                }
+            }
+            TypeKind::Nullable(_) => {
+                all_objects = false;
+                break;
+            }
+            _ if joined.is_object_like() => {
+                if !members.contains(&joined) {
+                    members.push(joined);
+                }
+            }
+            _ => {
+                all_objects = false;
+                break;
+            }
+        }
+    }
+
+    let intersection = (all_objects && members.len() > 1).then(|| PhpType::intersection(members));
+    let mut results: Vec<ResolvedType> = Vec::new();
+    for mut rt in per_owner.into_iter().flatten() {
+        if let Some(ref intersection) = intersection {
+            rt.type_string = intersection.clone();
+        }
+        ResolvedType::push_unique(&mut results, rt);
+    }
+    results
 }
 
 /// Expand union generic receiver types into separate owner entries.
@@ -2797,9 +2887,15 @@ pub(super) fn resolve_rhs_static_call(
                 // parameters typed as `@param class-string<Foo> $var`
                 // where there is no `$var = Foo::class` assignment.
                 let resolved = resolve_var_types(&var_name, ctx, ctx.cursor_offset);
-                resolved
-                    .iter()
-                    .find_map(|rt| match &rt.type_string.kind() {
+                let class_string = resolved.iter().find_map(|rt| match &rt.type_string.kind() {
+                    TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+                    TypeKind::Nullable(inner) => match inner.kind() {
+                        TypeKind::ClassString(Some(cs_inner)) => {
+                            cs_inner.base_name().map(|s| s.to_string())
+                        }
+                        _ => None,
+                    },
+                    TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
                         TypeKind::ClassString(Some(inner)) => {
                             inner.base_name().map(|s| s.to_string())
                         }
@@ -2809,31 +2905,29 @@ pub(super) fn resolve_rhs_static_call(
                             }
                             _ => None,
                         },
-                        TypeKind::Union(members) => members.iter().find_map(|m| match m.kind() {
-                            TypeKind::ClassString(Some(inner)) => {
-                                inner.base_name().map(|s| s.to_string())
-                            }
-                            TypeKind::Nullable(inner) => match inner.kind() {
-                                TypeKind::ClassString(Some(cs_inner)) => {
-                                    cs_inner.base_name().map(|s| s.to_string())
-                                }
-                                _ => None,
-                            },
-                            _ => None,
-                        }),
                         _ => None,
-                    })
-                    .or_else(|| {
-                        // Final fallback: `$var::method()` where `$var` is an
-                        // object instance (not a class-string). In PHP you can
-                        // call static methods on an instance reference.
-                        resolved
-                            .iter()
-                            .find_map(|rt| rt.type_string.base_name().map(|s| s.to_string()))
-                    })
+                    }),
+                    _ => None,
+                });
+                if class_string.is_none() && !resolved.is_empty() {
+                    return static_call_on_object(static_call, resolved, ctx);
+                }
+                class_string
             }
         }
-        _ => None,
+        // `$this->prop::method()`, `getFoo()::method()`: the class is the
+        // one a class-string names, or else the class of the object.
+        _ => {
+            let resolved = resolve_rhs_expression(static_call.class, ctx);
+            let class_string = resolved.iter().find_map(|rt| match rt.type_string.kind() {
+                TypeKind::ClassString(Some(inner)) => inner.base_name().map(|s| s.to_string()),
+                _ => None,
+            });
+            if class_string.is_none() && !resolved.is_empty() {
+                return static_call_on_object(static_call, resolved, ctx);
+            }
+            class_string
+        }
     };
     if let Some(cls_name) = class_name
         && let ClassLikeMemberSelector::Identifier(ident) = &static_call.method
@@ -2944,6 +3038,30 @@ pub(super) fn resolve_rhs_static_call(
         }
     }
     vec![]
+}
+
+/// `$obj::method()` where `$obj` holds an object rather than a class-string.
+///
+/// PHP calls the method on the object's own class, so this resolves exactly
+/// like `$obj->method()` would: a union receiver unions the results, an
+/// intersection intersects them, and `static` binds to the receiver.
+fn static_call_on_object(
+    static_call: &StaticMethodCall<'_>,
+    resolved: Vec<ResolvedType>,
+    ctx: &VarResolutionCtx<'_>,
+) -> Vec<ResolvedType> {
+    let classes = ResolvedType::into_arced_classes(resolved.clone());
+    if classes.is_empty() {
+        return vec![];
+    }
+    resolve_member_call_on_receiver(
+        static_call.class,
+        &static_call.method,
+        &static_call.argument_list,
+        Some((classes, resolved)),
+        true,
+        ctx,
+    )
 }
 
 /// The array shape a Laravel `validated()` / `validate()` /
