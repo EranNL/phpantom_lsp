@@ -105,7 +105,6 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B513 | [An assignment in the right operand of `&&` does not see what the left operand proved](todo/bugs.md#b513-an-assignment-in-the-right-operand-of--does-not-see-what-the-left-operand-proved) | Low | Low-Medium |
 | B512 | [A call whose argument is `*NEVER*` still has its declared return type](todo/bugs.md#b512-a-call-whose-argument-is-never-still-has-its-declared-return-type) | Low | Low-Medium |
 | B511 | [A union of shapes is not folded when one alternative covers another](todo/bugs.md#b511-a-union-of-shapes-is-not-folded-when-one-alternative-covers-another) | Low | Medium |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |

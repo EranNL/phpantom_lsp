@@ -48,17 +48,7 @@ Found porting PHPStan's `nsrt/bug-5129.php`; the assertion is `// SKIP` in the p
 
 ## Narrowing
 
-### B513. An assignment in the right operand of `&&` does not see what the left operand proved
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-function f(?\Exception $e) {
-    $e !== null && $x = $e;
-    $x; // should be Exception, is ?Exception
-}
-```
-
-`process_nested_assignments` walks both operands of a binary expression against the same scope, so the right operand of `&&` (and of `||`) resolves its assignments without the proof the left operand made, and the write it makes is treated as unconditional. A cursor inside the right operand already sees the narrowing, through `apply_cursor_ternary_narrowing`. The fix is the one the `?->` arguments got: walk the right operand on a narrowed copy and join it with the path that skipped it, which costs a scope clone per chain that holds an assignment.
+No outstanding items.
 
 ## Arithmetic
 

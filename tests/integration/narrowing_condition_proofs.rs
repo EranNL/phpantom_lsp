@@ -3650,3 +3650,36 @@ function f(array $xs, array $pair, array $ys): void {
     let ys = hover_line(11);
     assert!(ys.contains("array{string, string}"), "got: {ys}");
 }
+
+// ─── An assignment on the right of `&&`/`||` sees what the left proved ─────
+
+/// `$e !== null && $x = $e` narrows `$e` for the assignment's right-hand
+/// side, so `$x` ends up `Exception`, not `?Exception`.
+#[test]
+fn an_and_chain_assignment_sees_the_left_operands_proof() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(?Exception $e): void {
+    $e !== null && $x = $e;
+    $x; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, "file:///and_assignment_narrowing.php", content);
+    assert_eq!(text, "```php\n<?php\n$x = Exception\n```");
+}
+
+/// The mirror case for `||`: the right operand only runs when the left
+/// operand is false, so the assignment sees the *inverse* of what the left
+/// operand proved.
+#[test]
+fn an_or_chain_assignment_sees_the_left_operands_inverse_proof() {
+    let backend = create_test_backend();
+    let content = r#"<?php
+function f(?Exception $e): void {
+    $e === null || $x = $e;
+    $x; // <-- here
+}
+"#;
+    let text = hover_marked(&backend, "file:///or_assignment_narrowing.php", content);
+    assert_eq!(text, "```php\n<?php\n$x = Exception\n```");
+}
