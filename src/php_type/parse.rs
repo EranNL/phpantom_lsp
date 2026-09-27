@@ -462,14 +462,37 @@ fn convert(src: &str, ty: &cst::Type<'_>) -> PhpType {
         cst::Type::Shape(s) => {
             let entries = shape_entries(src, s.fields.iter());
 
-            match s.kind {
-                cst::ShapeTypeKind::Array
-                | cst::ShapeTypeKind::NonEmptyArray
-                | cst::ShapeTypeKind::AssociativeArray => PhpType::array_shape(entries),
-                cst::ShapeTypeKind::List | cst::ShapeTypeKind::NonEmptyList => {
-                    PhpType::list_shape(entries)
+            let is_list = matches!(
+                s.kind,
+                cst::ShapeTypeKind::List | cst::ShapeTypeKind::NonEmptyList
+            );
+            let shape = if is_list {
+                PhpType::list_shape(entries)
+            } else {
+                PhpType::array_shape(entries)
+            };
+            let Some(additional) = &s.additional_fields else {
+                return shape;
+            };
+            // `...` alone leaves the other entries unconstrained, and
+            // `...<V>` names only their value type.
+            let mut params: Vec<PhpType> = additional
+                .parameters
+                .iter()
+                .flat_map(|params| params.entries.iter())
+                .map(|e| convert(src, &e.inner))
+                .collect();
+            let (key, value) = match params.len() {
+                2 => {
+                    let value = params.pop().unwrap();
+                    (params.pop().unwrap(), value)
                 }
-            }
+                1 if is_list => (PhpType::int(), params.pop().unwrap()),
+                1 => (PhpType::named(atom("array-key")), params.pop().unwrap()),
+                _ if is_list => (PhpType::int(), PhpType::mixed()),
+                _ => (PhpType::named(atom("array-key")), PhpType::mixed()),
+            };
+            PhpType::unsealed_shape(shape, key, value)
         }
 
         // -- Object type (with optional shape) --------------------------------

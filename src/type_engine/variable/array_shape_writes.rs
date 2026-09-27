@@ -3,9 +3,10 @@
 
 use mago_syntax::cst::*;
 
-use crate::atom::{bytes_to_str, literal_bytes_to_str};
+use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
 use crate::php_type::{
-    LiteralValue, PhpType, ShapeEntry, TypeKind, is_decimal_int_array_key, runtime_shape_keys,
+    LiteralValue, PhpType, ShapeEntry, TypeKind, class_name_key, class_name_shape_key,
+    is_decimal_int_array_key, runtime_shape_keys,
 };
 use crate::types::ResolvedType;
 
@@ -469,6 +470,9 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
 /// (`$k = 'c'; $a[$k] = …`) names its entry as surely as one written at
 /// the write site.
 pub(super) fn literal_write_key(key_type: &PhpType) -> Option<Result<String, usize>> {
+    if let Some(class) = key_type.as_class_name_literal() {
+        return Some(Ok(class_name_shape_key(class)));
+    }
     match key_type.as_literal()? {
         LiteralValue::Int(raw) => raw.parse::<usize>().ok().map(Err),
         literal @ LiteralValue::String(_) => {
@@ -510,7 +514,9 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
         && !matches!(base.kind(), TypeKind::ArrayShape(_))
         && base.iterable_key_type().is_some()
     {
-        let key_type = if is_decimal_int_array_key(key) {
+        let key_type = if let Some(class) = class_name_key(key) {
+            PhpType::class_string(Some(PhpType::named(atom(class))))
+        } else if is_decimal_int_array_key(key) {
             PhpType::int()
         } else {
             PhpType::string()
@@ -563,14 +569,15 @@ fn write_literal_keys_into_shape(
     let written: Vec<String> = key_type
         .union_members()
         .iter()
-        .map(|member| match member.as_literal()? {
-            LiteralValue::Int(raw) => is_decimal_int_array_key(raw).then(|| raw.to_string()),
+        .map(|member| match member.as_literal() {
+            None => member.as_class_name_literal().map(class_name_shape_key),
+            Some(LiteralValue::Int(raw)) => is_decimal_int_array_key(raw).then(|| raw.to_string()),
             // A decimal-integer string names the same entry as the integer,
             // and shapes record both under the same spelling.
-            literal @ LiteralValue::String(_) => {
+            Some(literal @ LiteralValue::String(_)) => {
                 literal.string_content().map(std::borrow::Cow::into_owned)
             }
-            LiteralValue::Float(_) => None,
+            Some(LiteralValue::Float(_)) => None,
         })
         .collect::<Option<_>>()?;
     let runtime_keys = runtime_shape_keys(entries)?;

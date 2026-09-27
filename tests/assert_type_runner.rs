@@ -1210,8 +1210,11 @@ fn sort_nested_members(member: &str) -> String {
             out.push_str(&member[body_start..]);
             return out;
         };
+        // A generic argument keeps the space the whitespace pass puts after
+        // its comma, which would otherwise sort as part of its first member.
         let args: Vec<String> = split_top_level(&member[body_start..body_end], ',')
             .into_iter()
+            .map(str::trim_start)
             .map(|arg| match split_top_level(arg, ':').as_slice() {
                 [key, value] => format!("{key}:{}", sort_members_deep(value)),
                 _ => sort_members_deep(arg),

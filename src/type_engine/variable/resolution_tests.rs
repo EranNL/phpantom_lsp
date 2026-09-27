@@ -1329,7 +1329,7 @@ function test($rest) {
 "#;
     assert_eq!(
         resolve_literal_test_var(content, "$merged"),
-        "array<array-key, mixed>"
+        "array{a: mixed, ...<array-key, mixed>}"
     );
 }
 

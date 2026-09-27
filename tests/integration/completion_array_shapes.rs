@@ -6472,3 +6472,97 @@ async fn test_array_shape_key_completion_from_config_return_type() {
         _ => panic!("Expected CompletionResponse::Array"),
     }
 }
+
+async fn completion_labels(
+    text: &str,
+    line: u32,
+    character: u32,
+) -> Vec<(String, Option<CompletionItemKind>)> {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///array_shape_unsealed.php").unwrap();
+    backend
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "php".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+    let result = backend
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position { line, character },
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .unwrap();
+    match result {
+        Some(CompletionResponse::Array(items)) => items
+            .into_iter()
+            .map(|i| (i.filter_text.unwrap_or(i.label), i.kind))
+            .collect(),
+        Some(_) => panic!("Expected CompletionResponse::Array"),
+        None => Vec::new(),
+    }
+}
+
+#[tokio::test]
+async fn test_array_shape_key_completion_beside_spread_of_unknown_length() {
+    let text = concat!(
+        "<?php\n",
+        "class User {}\n",
+        "class AdminUser extends User {}\n",
+        "/** @var list<User> $users */\n",
+        "$users = [];\n",
+        "$config = ['admin' => new AdminUser(), ...$users];\n",
+        "$config['\n",
+    );
+    let items = completion_labels(text, 6, 9).await;
+    let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, vec!["admin"], "got {labels:?}");
+}
+
+#[tokio::test]
+async fn test_array_shape_entry_beside_spread_of_unknown_length_keeps_its_type() {
+    let text = concat!(
+        "<?php\n",
+        "class Guest {\n",
+        "    public function visit(): void {}\n",
+        "}\n",
+        "class Admin {\n",
+        "    public function revoke(): void {}\n",
+        "}\n",
+        "/** @param list<Guest> $guests */\n",
+        "function build(array $guests): void {\n",
+        "    $people = ['admin' => new Admin(), ...$guests];\n",
+        "    $people['admin']->\n",
+        "}\n",
+    );
+    let items = completion_labels(text, 10, 23).await;
+    let methods: Vec<&str> = items
+        .iter()
+        .filter(|(_, kind)| *kind == Some(CompletionItemKind::METHOD))
+        .map(|(label, _)| label.as_str())
+        .collect();
+    assert!(methods.contains(&"revoke"), "got {methods:?}");
+    assert!(!methods.contains(&"visit"), "got {methods:?}");
+}
+
+#[tokio::test]
+async fn test_array_shape_key_completion_unsealed_annotation() {
+    let text = concat!(
+        "<?php\n",
+        "/** @var array{name: string, ...<string, mixed>} $options */\n",
+        "$options = getOptions();\n",
+        "$options['\n",
+    );
+    let items = completion_labels(text, 3, 10).await;
+    let labels: Vec<&str> = items.iter().map(|(label, _)| label.as_str()).collect();
+    assert_eq!(labels, vec!["name"], "got {labels:?}");
+}

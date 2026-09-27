@@ -24,8 +24,9 @@ use crate::types::ResolvedType;
 /// in place), a value takes the next free integer key, and a spread copies
 /// its source's entries across, keeping string keys and renumbering integer
 /// keys onto the end. While every element's keys are known the result is a
-/// shape; the first one whose keys are not (a runtime key, a spread of an
-/// array of unknown length) turns it into `array<K, V>`/`list<T>`.
+/// shape. A spread of an array of unknown length leaves the entries written
+/// beside it known, and makes the shape an unsealed one; a runtime key turns
+/// it into `array<K, V>`/`list<T>`.
 pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
@@ -78,15 +79,54 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // known to be absent. `[]` is `array{}` for the same reason: a bare
     // `array` would not say it is empty, and a later write's result could
     // not absorb it when branches rejoin.
+    //
+    // Entries written beside a spread of unknown length are still known one
+    // by one, so they are kept as an unsealed shape with the spread's keys
+    // and values as its tail. With nothing written beside it, the tail is
+    // the whole array and the plain `array<K, V>`/`list<T>` says it.
     if let Some(exact) = builder.exact.take() {
         let positional = exact.iter().all(|(_, entry)| entry.key.is_none());
-        if !positional || exact.len() <= MAX_POSITIONAL_SHAPE_LEN {
-            return Some(PhpType::array_shape(
-                exact.into_iter().map(|(_, entry)| entry).collect(),
-            ));
+        let within_limit = !positional || exact.len() <= MAX_POSITIONAL_SHAPE_LEN;
+        match builder.tail.take() {
+            None if within_limit => {
+                return Some(PhpType::array_shape(
+                    exact.into_iter().map(|(_, entry)| entry).collect(),
+                ));
+            }
+            Some(tail) if within_limit && !exact.is_empty() => {
+                let entries = exact.into_iter().map(|(_, entry)| entry).collect();
+                let shape = if builder.is_list && positional {
+                    PhpType::list_shape(entries)
+                } else {
+                    PhpType::array_shape(entries)
+                };
+                let value = join_alternatives(tail.values, MAX_ELEMENT_ALTERNATIVES)
+                    .unwrap_or_else(PhpType::mixed);
+                return Some(PhpType::unsealed_shape(
+                    shape,
+                    join_key_types(tail.keys),
+                    value,
+                ));
+            }
+            _ => {}
         }
     }
     builder.loose_type()
+}
+
+/// Maximum number of distinct alternatives to keep in the element union
+/// before falling back to the base scalar types. A literal array that names
+/// more distinct values than this is a data table rather than a set of
+/// alternatives worth reasoning about, and the union's pairwise absorption
+/// is quadratic in its member count.
+const MAX_ELEMENT_ALTERNATIVES: usize = 32;
+
+/// The entries of an array literal beyond the ones known one by one, once
+/// a spread of unknown length has put some there.
+#[derive(Default)]
+struct LiteralTail {
+    keys: Vec<PhpType>,
+    values: Vec<PhpType>,
 }
 
 /// The array an array literal builds, as far as its elements so far go.
@@ -94,6 +134,10 @@ struct LiteralBuilder {
     /// The literal's entries alongside the runtime key each lands on, while
     /// every one of them is known. `None` once an element's keys are not.
     exact: Option<Vec<(String, crate::php_type::ShapeEntry)>>,
+    /// The entries a spread of unknown length added beside `exact`. Once
+    /// there are some, which integer key comes next is no longer known, so
+    /// a positional element joins them rather than `exact`.
+    tail: Option<LiteralTail>,
     /// The integer key the next positional element takes.
     next_index: i64,
     /// The key and value types every element contributes, for when the
@@ -111,6 +155,7 @@ impl Default for LiteralBuilder {
     fn default() -> Self {
         LiteralBuilder {
             exact: Some(Vec::new()),
+            tail: None,
             next_index: 0,
             key_types: Vec::new(),
             types: Vec::new(),
@@ -150,7 +195,13 @@ impl LiteralBuilder {
     /// Write a value under the next free integer key.
     fn append(&mut self, value_type: Option<PhpType>) {
         push_unique(&mut self.key_types, PhpType::int());
-        if let Some(exact) = self.exact.as_mut() {
+        if let Some(tail) = self.tail.as_mut() {
+            push_unique(&mut tail.keys, PhpType::int());
+            push_unique(
+                &mut tail.values,
+                value_type.clone().unwrap_or_else(PhpType::mixed),
+            );
+        } else if let Some(exact) = self.exact.as_mut() {
             // Positional while it lands on the index a reader counting the
             // positional entries before it would expect. Once an explicit
             // integer key has moved the index along, it is spelled out.
@@ -177,6 +228,21 @@ impl LiteralBuilder {
     /// Copy the entries of a spread `...$source` across, `source` being what
     /// the spread resolved to.
     fn spread(&mut self, source: Option<&PhpType>) {
+        // The listed entries of an unsealed shape are copied like a sealed
+        // shape's. A list's come first, ahead of the rest of the list; any
+        // other shape's are copied after its tail, since the tail cannot
+        // overwrite the value they are listed with.
+        if let Some(unsealed) = source.and_then(PhpType::as_unsealed_shape) {
+            if unsealed.shape.is_list_shape() {
+                self.spread(Some(&unsealed.shape));
+                self.spread(Some(&PhpType::list(unsealed.value.clone())));
+            } else {
+                let tail = PhpType::generic_array(unsealed.key.clone(), unsealed.value.clone());
+                self.spread(Some(&tail));
+                self.spread(Some(&unsealed.shape));
+            }
+            return;
+        }
         if let Some(entries) = source.and_then(spread_entries) {
             for (key, value_type) in entries {
                 match key {
@@ -189,43 +255,57 @@ impl LiteralBuilder {
             }
             return;
         }
-        self.loosen();
         let key_type = source.and_then(PhpType::iterable_key_type);
-        match key_type {
-            // Integer keys are renumbered onto the end.
-            Some(key) if key.is_int_subtype() => push_unique(&mut self.key_types, PhpType::int()),
-            Some(key) if key.is_string_subtype() => {
-                self.is_list = false;
-                push_unique(&mut self.key_types, key);
-            }
-            _ => {
-                self.is_list = false;
-                push_unique(&mut self.key_types, array_key_type());
-            }
+        // Integer keys are renumbered onto the end, so only the string keys
+        // keep what they are.
+        let copied_key = match &key_type {
+            Some(key) if key.is_int_subtype() => PhpType::int(),
+            Some(key) if key.is_string_subtype() => key.clone(),
+            _ => array_key_type(),
+        };
+        if !copied_key.is_int_subtype() {
+            self.is_list = false;
         }
+        push_unique(&mut self.key_types, copied_key.clone());
         // A spread copies values the source already knows, so its element
         // type carries over as written, the same as a value element beside
         // it.
-        match source.and_then(PhpType::iterable_element_type) {
-            Some(elem) => push_unique(&mut self.types, elem),
+        let elem = source.and_then(PhpType::iterable_element_type);
+        match &elem {
+            Some(elem) => push_unique(&mut self.types, elem.clone()),
             None => self.unknown_values = true,
         }
+        let Some(exact) = self.exact.as_mut() else {
+            return;
+        };
+        let elem = elem.unwrap_or_else(PhpType::mixed);
+        // A string key the source may hold overwrites the entry written
+        // under it, which is then one or the other.
+        if !copied_key.is_int_subtype() {
+            for (runtime_key, entry) in exact.iter_mut() {
+                if crate::php_type::canonical_int_key(runtime_key).is_none()
+                    && string_key_may_match(&copied_key, runtime_key)
+                {
+                    entry.value_type = PhpType::join_runtime_value_types(vec![
+                        entry.value_type.clone(),
+                        elem.clone(),
+                    ]);
+                }
+            }
+        }
+        let tail = self.tail.get_or_insert_default();
+        push_unique(&mut tail.keys, copied_key);
+        push_unique(&mut tail.values, elem);
     }
 
     /// Stop tracking the literal as a shape.
     fn loosen(&mut self) {
         self.exact = None;
+        self.tail = None;
     }
 
     /// The literal as `array<K, V>`, or `list<T>` when its keys are.
     fn loose_type(self) -> Option<PhpType> {
-        // Maximum number of distinct alternatives to keep in the element
-        // union before falling back to the base scalar types. A literal
-        // array that names more distinct values than this is a data table
-        // rather than a set of alternatives worth reasoning about, and the
-        // union's pairwise absorption is quadratic in its member count.
-        const MAX_ELEMENT_ALTERNATIVES: usize = 32;
-
         if self.types.is_empty() {
             return None;
         }
@@ -272,6 +352,20 @@ fn spread_entries(source: &PhpType) -> Option<Vec<(Option<String>, PhpType)>> {
             Some((key, entry.value_type.clone()))
         })
         .collect()
+}
+
+/// Whether a key of type `key_type` may be the string `key`: any string
+/// key may be, unless every alternative is a literal naming another one.
+fn string_key_may_match(key_type: &PhpType, key: &str) -> bool {
+    key_type
+        .union_members()
+        .into_iter()
+        .any(|member| match member.as_literal() {
+            Some(literal) => literal
+                .string_content()
+                .is_none_or(|content| content == key),
+            None => !member.is_int_subtype(),
+        })
 }
 
 /// Collapse a set of alternatives into one type, or `None` when empty.

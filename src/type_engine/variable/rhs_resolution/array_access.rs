@@ -169,6 +169,9 @@ pub(super) fn resolve_rhs_array_access<'b>(
 /// Whether `ty` is, or has a union member that is, an array shape: the
 /// only kind of array whose offset reads depend on which key is read.
 fn has_shape_member(ty: &PhpType) -> bool {
+    if ty.as_unsealed_shape().is_some() {
+        return true;
+    }
     match ty.kind() {
         TypeKind::ArrayShape(_) => true,
         TypeKind::Nullable(inner) => has_shape_member(inner),

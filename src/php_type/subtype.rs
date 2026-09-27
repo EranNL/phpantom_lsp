@@ -7,6 +7,17 @@ impl PhpType {
         if self == other {
             return true;
         }
+        // Structural twins are one interned node, so two different unsealed
+        // shapes differ, and one differs from the generic array it widens
+        // to even though `kind()` cannot tell the two apart.
+        if self.as_unsealed_shape().is_some() || other.as_unsealed_shape().is_some() {
+            return false;
+        }
+        // An exact class name is narrower than the `class-string<T>` it
+        // reads as.
+        if self.as_class_name_literal().is_some() != other.as_class_name_literal().is_some() {
+            return false;
+        }
         match (self.kind(), other.kind()) {
             (TypeKind::Named(a), TypeKind::Named(b)) => {
                 Self::short_name_of(a) == Self::short_name_of(b)

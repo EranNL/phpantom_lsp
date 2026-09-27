@@ -37,7 +37,27 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B539. A property null check held in a variable does not narrow the property
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+$both = $this->unsealed !== null && $type->unsealed !== null;
+if ($both) {
+    [, $value] = $type->unsealed;
+    // Type|null, should be Type
+}
+```
+
+A condition assigned to a variable and tested later narrows what it
+checked when that is a variable (`$has = $pair !== null; if ($has)`), but
+not when it is a property: the property keeps its `null` inside the `if`.
+A single check fails the same way as a conjunction.
+
+Found in phpstan-src's `ConstantArrayType::isSuperTypeOf()` (three
+argument mismatches at lines 787, 842 and 843, none of which PHPStan
+reports). They are already there at HEAD, so the sample sweep of
+2026-09-26 predates them.
 
 ## Arithmetic
 
@@ -49,55 +69,7 @@ No outstanding items.
 
 ## Array types
 
-### B537. An array of unknown length spread after known entries loses them
-
-**Impact: Low-Medium · Complexity: Medium-High**
-
-```php
-/** @var list<User> $users */
-$config = ['admin' => new AdminUser(), ...$users];
-// array<int|string, AdminUser|User>, should be array{admin: AdminUser, ...<int, User>}
-```
-
-A spread whose source has no fixed set of keys (`list<T>`, `array<K, V>`)
-turns the whole literal into `array<K, V>`, so the entries written beside
-it are no longer known one by one: `$config['` offers no key completion,
-and `$config['admin']` reads `AdminUser|User`. PHPStan and Psalm describe
-this as an unsealed shape, the known entries plus a `...<K, V>` tail for
-the rest. PHPantom has no such type, so this needs one in `php_type/`
-(parsing, display, and the shape operations that would have to respect
-the tail) before the array literal builder in
-`type_engine/variable/raw_type_inference.rs` can produce it.
-
-The SKIPs are in `tests/psalm_assertions/array_assignment.php`, under
-"PHPantom has no unsealed shape type".
-Found porting Psalm's `ArrayAssignmentTest.php`.
-
-### B538. `Foo::class` is typed as `class-string<Foo>` rather than the name it evaluates to
-
-**Impact: Low · Complexity: Medium**
-
-```php
-$result = [];
-foreach ([a::class, b::class] as $k) {
-    $result[$k] = true;
-}
-// non-empty-array<class-string<a>|class-string<b>, true>, should be array{a::class: true, b::class: true}
-```
-
-`a::class` is exactly the string `'…\a'`, but it is typed as
-`class-string<a>`, which also admits every subclass's name. A write
-through it cannot name the entry it lands on, so a loop over a list of
-class constants builds `array<K, V>` where a list of string literals
-builds a shape. Typing `Foo::class` as the literal name (while still
-treating it as a `class-string<Foo>` wherever one is expected) would let
-it take the same path, and shapes would need a way to carry a
-class-constant key they can compare, which they currently only store as
-its spelling.
-
-The SKIP is in `tests/psalm_assertions/array_assignment.php`, under
-"`a::class` is typed as `class-string<a>`".
-Found porting Psalm's `ArrayAssignmentTest.php` (`assignUnionOfLiteralsClassKeys`).
+No outstanding items.
 
 ## Laravel
 

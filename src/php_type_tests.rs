@@ -761,6 +761,35 @@ fn iterable_key_type_preserves_unknown_class_constant_key_domain() {
 }
 
 #[test]
+fn class_name_shape_key_round_trips_as_a_class_string_key() {
+    let ty = PhpType::parse("array{Foo\\Bar::class: int}");
+    assert_eq!(ty.to_string(), "array{Foo\\Bar::class: int}");
+    assert_eq!(
+        ty.iterable_key_type().unwrap().to_string(),
+        "class-string<Foo\\Bar>"
+    );
+    let resolved = PhpType::parse("array{Bar::class: int, Bar::BAZ: int, self::QUX: int}")
+        .resolve_names(&|name| format!("App\\{name}"));
+    assert_eq!(
+        resolved.to_string(),
+        "array{App\\Bar::class: int, App\\Bar::BAZ: int, self::QUX: int}"
+    );
+}
+
+#[test]
+fn class_name_literal_reads_as_its_class_string() {
+    let exact = PhpType::class_name_literal(atom("Foo"));
+    let class_string = PhpType::class_string(Some(PhpType::named(atom("Foo"))));
+    assert_eq!(exact.as_class_name_literal(), Some("Foo"));
+    assert_eq!(exact.to_string(), "class-string<Foo>");
+    assert!(matches!(exact.kind(), TypeKind::ClassString(_)));
+    // Beside the wider class-string it is one of, it adds nothing.
+    let union = PhpType::union(vec![exact.clone(), class_string.clone()]);
+    assert_eq!(union, class_string);
+    assert!(!exact.equivalent(&class_string));
+}
+
+#[test]
 fn shape_value_type_nullable() {
     let ty = PhpType::parse("?array{name: string}");
     assert_eq!(ty.shape_value_type("name"), Some(&PhpType::string()));
@@ -806,6 +835,47 @@ fn shape_entries_object() {
     let entries = ty.shape_entries().unwrap();
     assert_eq!(entries.len(), 1);
     assert_eq!(entries[0].key, Some("foo".to_owned()));
+}
+
+#[test]
+fn unsealed_shape_round_trips() {
+    for spelling in [
+        "array{name: string, ...<string, int>}",
+        "list{string, ...<int>}",
+    ] {
+        assert_eq!(PhpType::parse(spelling).to_string(), spelling);
+    }
+    assert_eq!(
+        PhpType::parse("array{name: string, ...}").to_string(),
+        "array{name: string, ...<array-key, mixed>}"
+    );
+    assert_eq!(
+        PhpType::parse("array{name: string, ...<int>}").to_string(),
+        "array{name: string, ...<array-key, int>}"
+    );
+}
+
+#[test]
+fn unsealed_shape_reads_as_the_array_it_widens_to() {
+    let ty = PhpType::parse("array{name: string, ...<int, User>}");
+    // Code that does not ask about the tail sees an array of both.
+    assert_eq!(
+        ty.iterable_element_type().unwrap().to_string(),
+        "string|User"
+    );
+    assert_eq!(ty.iterable_key_type().unwrap().to_string(), "string|int");
+    assert!(ty.shape_entries().is_none());
+    // An offset read of a listed key, and key completion, see the entry.
+    assert_eq!(ty.shape_value_type("name").unwrap().to_string(), "string");
+    assert_eq!(ty.known_shape_entries().unwrap().len(), 1);
+    assert!(!ty.equivalent(&PhpType::parse("non-empty-array<string|int, string|User>")));
+}
+
+#[test]
+fn unsealed_shape_without_entries_is_the_plain_array() {
+    let ty = PhpType::parse("array{...<string, int>}");
+    assert!(ty.as_unsealed_shape().is_none());
+    assert_eq!(ty.to_string(), "array<string, int>");
 }
 
 #[test]

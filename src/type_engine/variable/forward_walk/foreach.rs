@@ -766,6 +766,9 @@ fn mark_visited_keys_written(
             if entry.optional {
                 return None;
             }
+            if let Some(class) = entry.value_type.as_class_name_literal() {
+                return Some(crate::php_type::class_name_shape_key(class));
+            }
             let literal = entry.value_type.as_literal()?;
             match literal {
                 LiteralValue::Int(raw) => Some(raw.to_string()),

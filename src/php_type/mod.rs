@@ -84,13 +84,43 @@ impl PhpType {
     /// always enough to reach the node itself.
     ///
     /// A [`TemplateParam`](TypeKind::TemplateParam) is seen through to its
-    /// bound the same way, which may take one more hop.
+    /// bound the same way, which may take one more hop, and an
+    /// [`UnsealedShape`](TypeKind::UnsealedShape) to the generic array it
+    /// widens to.
     #[inline]
     pub fn kind(&self) -> &TypeKind {
         match &*self.0 {
             TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => &inner.0,
             TypeKind::TemplateParam(_, bound) => bound.kind(),
+            TypeKind::UnsealedShape(unsealed) => &unsealed.widened.0,
+            TypeKind::ClassNameLiteral(class_string) => &class_string.0,
             kind => kind,
+        }
+    }
+
+    /// The class this type is exactly the name of, when it is a
+    /// [`ClassNameLiteral`](TypeKind::ClassNameLiteral).
+    #[inline]
+    pub fn as_class_name_literal(&self) -> Option<&str> {
+        let TypeKind::ClassNameLiteral(class_string) = &*self.0 else {
+            return None;
+        };
+        match class_string.kind() {
+            TypeKind::ClassString(Some(class)) => match class.kind() {
+                TypeKind::Named(name) => Some(name.as_str()),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
+
+    /// The unsealed shape this type is, when it is a
+    /// [`UnsealedShape`](TypeKind::UnsealedShape).
+    #[inline]
+    pub fn as_unsealed_shape(&self) -> Option<&UnsealedShape> {
+        match &*self.0 {
+            TypeKind::UnsealedShape(unsealed) => Some(unsealed),
+            _ => None,
         }
     }
 
@@ -359,6 +389,44 @@ pub enum TypeKind {
     /// `kind()` drops the name and keeps the bound, which is what it was
     /// before the marker existed.
     TemplateParam(Atom, PhpType),
+
+    /// An unsealed shape: `array{a: A, ...<K, V>}` or `list{A, ...<V>}`.
+    /// The entries it lists are known to be there, and any number of
+    /// others, keyed `K` and holding `V`, may sit beside them.
+    ///
+    /// Invisible to [`PhpType::kind`], which sees the generic array the
+    /// shape widens to (`non-empty-array<'a'|K, A|V>`, spelled with the
+    /// key types rather than the literals). Code that knows nothing about
+    /// the tail therefore treats it as the `array<K, V>` it also is, which
+    /// is what it was before the type existed and is never wrong. Only the
+    /// code that asks, through [`PhpType::as_unsealed_shape`], gets to read
+    /// the listed entries one by one: offset reads, key completion and the
+    /// display.
+    UnsealedShape(Box<UnsealedShape>),
+
+    /// `Foo::class`: the name of the class `Foo` itself, which the inner
+    /// `class-string<Foo>` also admits the name of any subclass beside.
+    ///
+    /// Invisible to [`PhpType::kind`] and the display, which both see the
+    /// `class-string<Foo>`, so the value goes wherever a class-string does.
+    /// Only a write through it asks, via
+    /// [`PhpType::as_class_name_literal`], since knowing the one name it
+    /// holds is what lets the write name the entry it lands on.
+    ClassNameLiteral(PhpType),
+}
+
+/// Payload of [`TypeKind::UnsealedShape`].
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct UnsealedShape {
+    /// The entries known to be there, as an `array{…}`, or a `list{…}`
+    /// when the whole array is a list.
+    pub shape: PhpType,
+    /// The key type of the entries beyond the listed ones.
+    pub key: PhpType,
+    /// The value type of the entries beyond the listed ones.
+    pub value: PhpType,
+    /// What [`PhpType::kind`] answers for the whole shape.
+    widened: PhpType,
 }
 
 /// Payload of [`TypeKind::Generic`].
@@ -654,6 +722,39 @@ pub(crate) fn may_read_string_offset(key: &str) -> bool {
     digits.bytes().next().is_some_and(|b| b.is_ascii_digit())
 }
 
+/// The shape key an entry written under `Foo::class` is recorded with: the
+/// constant's spelling, which is how a docblock writes the same key and
+/// which keeps it a `class-string<Foo>` when the keys are read back.
+pub(crate) fn class_name_shape_key(class: &str) -> String {
+    format!("{class}::class")
+}
+
+/// The class a shape key spelled `Foo::class` is the name of.
+pub(crate) fn class_name_key(key: &str) -> Option<&str> {
+    let (class, constant) = key.rsplit_once("::")?;
+    (constant.eq_ignore_ascii_case("class") && is_class_name_spelling(class)).then_some(class)
+}
+
+/// Whether `text` is spelled like a class name, qualified or not.
+fn is_class_name_spelling(text: &str) -> bool {
+    let text = text.strip_prefix('\\').unwrap_or(text);
+    !text.is_empty()
+        && text.split('\\').all(|part| {
+            part.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_' || !c.is_ascii())
+                && part
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '_' || !c.is_ascii())
+        })
+}
+
+/// The class a shape key spelled `Foo::CONSTANT` reads its constant from,
+/// and the constant's name.
+pub(crate) fn class_constant_key(key: &str) -> Option<(&str, &str)> {
+    let (class, constant) = key.rsplit_once("::")?;
+    (is_class_name_spelling(class) && is_class_name_spelling(constant) && !constant.contains('\\'))
+        .then_some((class, constant))
+}
+
 /// The runtime array key each shape entry occupies, in order.
 ///
 /// A positional entry takes the next free integer index, mirroring the
@@ -846,6 +947,11 @@ impl PhpType {
         TypeKind::ClassString(inner).into()
     }
 
+    /// `Foo::class`: exactly the name of `class`.
+    pub fn class_name_literal(class: Atom) -> PhpType {
+        TypeKind::ClassNameLiteral(PhpType::class_string(Some(PhpType::named(class)))).into()
+    }
+
     /// `interface-string<T>`, or bare `interface-string` when `inner` is
     /// `None`.
     pub fn interface_string(inner: Option<PhpType>) -> PhpType {
@@ -910,6 +1016,7 @@ impl PhpType {
             return members.into_iter().next().unwrap();
         }
         normalize::absorb_subsumed_shapes(&mut members);
+        normalize::absorb_exact_class_names(&mut members);
         if members.len() == 1 {
             return members.into_iter().next().unwrap();
         }
@@ -949,6 +1056,52 @@ impl PhpType {
             return inner;
         }
         TypeKind::ListShape(inner).into()
+    }
+
+    /// Unsealed shape (`array{…, ...<K, V>}`): the entries of `shape`, plus
+    /// any number of others keyed `key` and holding `value`.
+    ///
+    /// A `list{…}` shape makes an unsealed list, whose further entries
+    /// continue the count, so `key` is taken to be `int` there. A shape
+    /// with no entries says nothing the tail does not, and is returned as
+    /// the plain `array<K, V>` / `list<V>`; so is anything that is not a
+    /// shape at all, which a transform rebuilding the parts may produce.
+    pub fn unsealed_shape(shape: PhpType, key: PhpType, value: PhpType) -> PhpType {
+        let is_list = shape.is_list_shape();
+        let entries: &[ShapeEntry] = match shape.kind() {
+            TypeKind::ArrayShape(entries) => entries,
+            _ => &[],
+        };
+        let non_empty = entries.iter().any(|entry| !entry.optional);
+        let widened_value = match shape.iterable_element_type() {
+            Some(known) => PhpType::join_runtime_value_types(vec![known, value.clone()]),
+            None => value.clone(),
+        };
+        let widened = if is_list {
+            let name = if non_empty { "non-empty-list" } else { "list" };
+            PhpType::generic(name, vec![widened_value])
+        } else {
+            let widened_key = match shape.iterable_key_type() {
+                Some(known) => PhpType::join_runtime_value_types(vec![known, key.clone()]),
+                None => key.clone(),
+            };
+            let name = if non_empty {
+                "non-empty-array"
+            } else {
+                "array"
+            };
+            PhpType::generic(name, vec![widened_key, widened_value])
+        };
+        if entries.is_empty() {
+            return widened;
+        }
+        TypeKind::UnsealedShape(Box::new(UnsealedShape {
+            shape,
+            key: if is_list { PhpType::int() } else { key },
+            value,
+            widened,
+        }))
+        .into()
     }
 
     /// Object shape (`object{…}`).
@@ -1933,7 +2086,8 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::TemplateParam(_, inner) => inner.to_native_hint_typed(),
+            | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.to_native_hint_typed(),
             TypeKind::Named(s) | TypeKind::StaticType(s) | TypeKind::ThisType(s) => {
                 native_scalar_name(s).map(|n| PhpType::named(atom(n)))
             }
@@ -1992,7 +2146,9 @@ impl PhpType {
                     Some(PhpType::intersection(deduped))
                 }
             }
-            TypeKind::Array(_) | TypeKind::ArrayShape(_) => Some(PhpType::array()),
+            TypeKind::Array(_) | TypeKind::ArrayShape(_) | TypeKind::UnsealedShape(_) => {
+                Some(PhpType::array())
+            }
             TypeKind::ClassString(_) | TypeKind::InterfaceString(_) => Some(PhpType::string()),
             TypeKind::IntRange(_, _) => Some(PhpType::int()),
             TypeKind::Literal(l) => Some(match **l {
@@ -2121,10 +2277,13 @@ impl PhpType {
                     .iter()
                     .map(|entry| match entry.key.as_deref() {
                         None => PhpType::int(),
-                        // The parser currently stores a class-constant shape
-                        // key only as its display spelling. Without resolving
-                        // the constant, its runtime array key may be int or
-                        // string (`Foo::class` is safely covered as a subset).
+                        // A class-constant key is stored as its spelling.
+                        // `Foo::class` is the class's name; any other
+                        // constant, not being read here, may be an int or a
+                        // string.
+                        Some(key) if let Some(class) = class_name_key(key) => {
+                            PhpType::class_string(Some(PhpType::named(atom(class))))
+                        }
                         Some(key) if key.contains("::") => {
                             PhpType::union(vec![PhpType::int(), PhpType::string()])
                         }
@@ -2318,6 +2477,9 @@ impl PhpType {
     ///
     /// [`shape_value_type`]: PhpType::shape_value_type
     pub fn shape_entry(&self, key: &str) -> Option<&ShapeEntry> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.shape_entry(key);
+        }
         match self.kind() {
             TypeKind::ArrayShape(entries) => {
                 // First try an exact key match (handles named and explicit
@@ -2360,6 +2522,9 @@ impl PhpType {
     /// Returns `None` if this is not an array shape or the key is not
     /// found.
     pub fn extract_shape_key_type(&self, key: &str) -> Option<PhpType> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.extract_shape_key_type(key);
+        }
         match self.kind() {
             TypeKind::ArrayShape(_) => self.shape_entry(key).map(|entry| {
                 if entry.optional {
@@ -2395,6 +2560,25 @@ impl PhpType {
                 // Find the first array/object shape member in the union.
                 members.iter().find_map(|m| m.shape_entries())
             }
+            _ => None,
+        }
+    }
+
+    /// The entries a shape is known to hold, whether it is sealed or not:
+    /// what [`shape_entries`](Self::shape_entries) answers, and also the
+    /// listed entries of an unsealed `array{…, ...<K, V>}`.
+    ///
+    /// The entries of an unsealed shape are not the whole array, so this
+    /// is for a caller that only reads them (offering a key, say), never
+    /// for one that builds a shape back out of them.
+    pub fn known_shape_entries(&self) -> Option<&[ShapeEntry]> {
+        if let Some(unsealed) = self.as_unsealed_shape() {
+            return unsealed.shape.shape_entries();
+        }
+        match self.kind() {
+            TypeKind::ArrayShape(entries) | TypeKind::ObjectShape(entries) => Some(entries),
+            TypeKind::Nullable(inner) => inner.known_shape_entries(),
+            TypeKind::Union(members) => members.iter().find_map(|m| m.known_shape_entries()),
             _ => None,
         }
     }
@@ -3197,8 +3381,10 @@ impl PhpType {
     /// parse→check round-trip when the caller already has a `PhpType`.
     pub fn is_informative(&self) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => inner.is_informative(),
-            TypeKind::Generic(..) => true,
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.is_informative(),
+            TypeKind::Generic(..) | TypeKind::UnsealedShape(..) => true,
             TypeKind::ArrayShape(..) | TypeKind::ObjectShape(..) => true,
             TypeKind::Array(..) => true,
             TypeKind::Union(members) => members.iter().any(|m| m.is_informative()),
@@ -3257,9 +3443,14 @@ impl PhpType {
             return false;
         }
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => {
                 inner.references_any_template_param(template_params)
             }
+            TypeKind::UnsealedShape(unsealed) => unsealed
+                .widened
+                .references_any_template_param(template_params),
             TypeKind::Named(name) => template_params.iter().any(|p| p == name),
             TypeKind::TemplateParam(name, bound) => {
                 template_params.iter().any(|p| p == name)

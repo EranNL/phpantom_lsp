@@ -36,6 +36,11 @@ impl PhpType {
         if let Some((name, bound)) = self.as_template_param() {
             return PhpType::template_param(name, bound.simplified());
         }
+        // Rebuilding either marker through `kind()` would keep only the
+        // wider type it reads as.
+        if self.as_unsealed_shape().is_some() || self.as_class_name_literal().is_some() {
+            return self.clone();
+        }
         match self.kind() {
             TypeKind::Union(members) => {
                 let mut simplified: Vec<PhpType> = Vec::with_capacity(members.len());
@@ -391,6 +396,12 @@ impl PhpType {
 ///
 /// Only scalar value domains take part; see [`is_runtime_scalar_value_domain`].
 pub(crate) fn is_runtime_value_subtype(subtype: &PhpType, supertype: &PhpType) -> bool {
+    // `kind()` reads an unsealed shape as the array it widens to, and an
+    // exact class name as the `class-string<T>` it is one of, so either
+    // would take in the wider type it is read as and drop it from a join.
+    if supertype.as_unsealed_shape().is_some() || supertype.as_class_name_literal().is_some() {
+        return subtype == supertype;
+    }
     // `array{}` is the empty array, and every array type that does not
     // demand an entry has it as a member value.  That is real value
     // containment rather than the variance/coercion kind
@@ -740,6 +751,26 @@ fn named_value_domain(name: &str) -> Option<ValueDomain> {
 /// overwhelmingly common case of a union that is already distinct. Unions
 /// are small (two or three members in almost every real type), so a
 /// pairwise scan answers the question without touching the allocator.
+/// Drop each `Foo::class` that sits beside the `class-string<Foo>` it is
+/// one of, which already says everything it does.
+///
+/// The two read the same through `kind()`, so without this they would show
+/// as `class-string<Foo>|class-string<Foo>`, and dedup keeping whichever
+/// came first could leave the narrower one standing for both.
+pub(crate) fn absorb_exact_class_names(types: &mut Vec<PhpType>) {
+    if !types.iter().any(|ty| ty.as_class_name_literal().is_some()) {
+        return;
+    }
+    let wider: Vec<*const TypeKind> = types
+        .iter()
+        .filter(|ty| ty.as_class_name_literal().is_none())
+        .map(|ty| std::ptr::from_ref(ty.kind()))
+        .collect();
+    types.retain(|ty| {
+        ty.as_class_name_literal().is_none() || !wider.contains(&std::ptr::from_ref(ty.kind()))
+    });
+}
+
 pub(crate) fn has_duplicate_members(types: &[PhpType]) -> bool {
     types.iter().enumerate().skip(1).any(|(index, ty)| {
         types[..index]
@@ -950,6 +981,12 @@ fn hash_for_dedup<H: Hasher>(ty: &PhpType, state: &mut H) {
 fn equivalent_for_dedup(left: &PhpType, right: &PhpType) -> bool {
     if left == right {
         return true;
+    }
+    if left.as_unsealed_shape().is_some() || right.as_unsealed_shape().is_some() {
+        return false;
+    }
+    if left.as_class_name_literal().is_some() != right.as_class_name_literal().is_some() {
+        return false;
     }
 
     match (left.kind(), right.kind()) {

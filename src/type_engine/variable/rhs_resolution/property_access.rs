@@ -133,13 +133,27 @@ pub(super) fn resolve_rhs_property_access(
                     // (`Support\Pen` behind `use App\Support;`) is neither the
                     // FQCN nor resolvable on its own once the class-string
                     // leaves this file's context.  Prefer the resolved class.
-                    let named = match target_classes.first() {
-                        Some(cls) => PhpType::named(cls.fqn()),
-                        None => PhpType::named(atom(resolved_name)),
+                    let name = match target_classes.first() {
+                        Some(cls) => cls.fqn(),
+                        None => atom(resolved_name),
                     };
-                    return vec![ResolvedType::from_type_string(PhpType::class_string(Some(
-                        named,
-                    )))];
+                    // A written name, `self` and `parent` each name one class,
+                    // so the constant is exactly that class's name. `static`
+                    // is whichever subclass the call was made on, and a
+                    // trait's `self` whichever class uses the trait.
+                    let names_one_class = match cca.class {
+                        Expression::Static(_) => false,
+                        Expression::Self_(_) | Expression::Parent(_) => {
+                            ctx.current_class.kind != crate::types::ClassLikeKind::Trait
+                        }
+                        _ => true,
+                    };
+                    let ty = if names_one_class {
+                        PhpType::class_name_literal(name)
+                    } else {
+                        PhpType::class_string(Some(PhpType::named(name)))
+                    };
+                    return vec![ResolvedType::from_type_string(ty)];
                 }
                 target_classes
             }

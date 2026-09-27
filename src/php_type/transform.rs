@@ -86,8 +86,25 @@ impl PhpType {
 
         match self.raw_kind() {
             TypeKind::Benevolent(inner) => PhpType::benevolent(map(inner)),
+            // Resolving the name leaves it the name of one class, and
+            // anything else a map makes of it is no longer one.
+            TypeKind::ClassNameLiteral(inner) => {
+                let mapped = map(inner);
+                match mapped.kind() {
+                    TypeKind::ClassString(Some(class)) => match class.kind() {
+                        TypeKind::Named(name) => PhpType::class_name_literal(*name),
+                        _ => mapped,
+                    },
+                    _ => mapped,
+                }
+            }
             TypeKind::ListShape(inner) => PhpType::as_list_shape(map(inner)),
             TypeKind::TemplateParam(name, bound) => PhpType::template_param(*name, map(bound)),
+            TypeKind::UnsealedShape(unsealed) => PhpType::unsealed_shape(
+                map(&unsealed.shape),
+                map(&unsealed.key),
+                map(&unsealed.value),
+            ),
             TypeKind::Nullable(inner) => PhpType::nullable(map(inner)),
             TypeKind::Union(types) => PhpType::union(types.iter().map(&map).collect()),
             TypeKind::Intersection(types) => {
@@ -208,6 +225,30 @@ impl PhpType {
             // maybe-a-keyword, so both go to the resolver unconditionally.
             TypeKind::StaticType(s) => PhpType::static_type(atom(&resolver(s))),
             TypeKind::ThisType(s) => PhpType::this_type(atom(&resolver(s))),
+            // A class-constant key names its class the way the docblock was
+            // written, and has to be resolved like any other name to be
+            // compared with a key spelled somewhere else.
+            TypeKind::ArrayShape(entries)
+                if entries
+                    .iter()
+                    .any(|e| e.key.as_deref().and_then(class_constant_key).is_some()) =>
+            {
+                PhpType::array_shape(
+                    entries
+                        .iter()
+                        .map(|e| ShapeEntry {
+                            key: e.key.as_deref().map(|key| match class_constant_key(key) {
+                                Some((class, constant)) => {
+                                    format!("{}::{constant}", resolve(&atom(class)))
+                                }
+                                None => key.to_string(),
+                            }),
+                            value_type: e.value_type.resolve_names(resolver),
+                            optional: e.optional,
+                        })
+                        .collect(),
+                )
+            }
             _ => self.map_children(&|t| t.resolve_names(resolver)),
         }
     }
@@ -398,12 +439,14 @@ impl PhpType {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
             | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner)
             | TypeKind::Nullable(inner)
             | TypeKind::Array(inner)
             | TypeKind::KeyOf(inner)
             | TypeKind::ValueOf(inner)
             | TypeKind::ClassString(Some(inner))
             | TypeKind::InterfaceString(Some(inner)) => inner.contains_self_constant(),
+            TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_self_constant(),
             TypeKind::Union(types) | TypeKind::Intersection(types) => {
                 types.iter().any(PhpType::contains_self_constant)
             }
@@ -507,10 +550,12 @@ impl PhpType {
     /// `pred`.
     fn contains_name_matching(&self, pred: &dyn Fn(&str) -> bool) -> bool {
         match self.raw_kind() {
-            TypeKind::Benevolent(inner) | TypeKind::ListShape(inner) => {
-                inner.contains_name_matching(pred)
-            }
+            TypeKind::Benevolent(inner)
+            | TypeKind::ListShape(inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.contains_name_matching(pred),
             TypeKind::Named(s) => pred(s),
+            // The widened form names every type the parts do.
+            TypeKind::UnsealedShape(unsealed) => unsealed.widened.contains_name_matching(pred),
             TypeKind::TemplateParam(name, bound) => {
                 pred(name) || bound.contains_name_matching(pred)
             }
@@ -847,7 +892,13 @@ impl PhpType {
         match self.raw_kind() {
             TypeKind::Benevolent(inner)
             | TypeKind::ListShape(inner)
-            | TypeKind::TemplateParam(_, inner) => inner.collect_class_names(names),
+            | TypeKind::TemplateParam(_, inner)
+            | TypeKind::ClassNameLiteral(inner) => inner.collect_class_names(names),
+            TypeKind::UnsealedShape(unsealed) => {
+                unsealed.shape.collect_class_names(names);
+                unsealed.key.collect_class_names(names);
+                unsealed.value.collect_class_names(names);
+            }
             TypeKind::Named(s) => {
                 if !is_keyword_type(s) && !s.is_empty() && !names.iter().any(|n| n == s.as_str()) {
                     names.push(s.to_string());

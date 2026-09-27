@@ -162,7 +162,7 @@ fn s(o: &Option<String>) -> Sz {
 
 fn vs(v: &[String]) -> Sz {
     let mut z = Sz::default();
-    z.add(v.capacity() * size_of::<String>());
+    z.add(v.len() * size_of::<String>());
     for x in v {
         z.add(x.capacity());
     }
@@ -219,6 +219,9 @@ fn variant_name(t: &PhpType) -> &'static str {
         TypeKind::Raw(_) => "Raw",
         TypeKind::Benevolent(_) => "Benevolent",
         TypeKind::ListShape(_) => "ListShape",
+        TypeKind::TemplateParam(..) => "TemplateParam",
+        TypeKind::UnsealedShape(_) => "UnsealedShape",
+        TypeKind::ClassNameLiteral(_) => "ClassNameLiteral",
     }
 }
 
@@ -255,9 +258,18 @@ fn ty(t: &PhpType) -> Sz {
         | TypeKind::KeyOf(b)
         | TypeKind::ValueOf(b)
         | TypeKind::Benevolent(b)
-        | TypeKind::ListShape(b) => {
+        | TypeKind::ListShape(b)
+        | TypeKind::TemplateParam(_, b)
+        | TypeKind::ClassNameLiteral(b) => {
             z.slot(1);
             z += ty(b);
+        }
+        TypeKind::UnsealedShape(u) => {
+            z.add(size_of::<crate::php_type::UnsealedShape>());
+            z.slot(4);
+            z += ty(&u.shape);
+            z += ty(&u.key);
+            z += ty(&u.value);
         }
         TypeKind::Union(v) | TypeKind::Intersection(v) => z += ty_vec(v),
         TypeKind::Generic(g) => {
@@ -1512,7 +1524,7 @@ pub(crate) fn report(backend: &Backend, runner_content_bytes: usize) {
         if let Some(trees) = &c.config_trees {
             // ConfigNode is recursive; count the spine only.
             laravel_keys.add(trees.capacity() * 64);
-            for (k, _) in trees {
+            for (k, _) in trees.iter() {
                 laravel_keys.add(k.capacity());
             }
         }

@@ -39,7 +39,7 @@ namespace PsalmTest_array_assignment_2 {
         $vv = new $k;
     }
 
-    assertType('array{a::class: true, b::class: true}', $result); // SKIP: `a::class` is typed as `class-string<a>`, not the literal class name
+    assertType('array{a::class: true, b::class: true}', $result);
 }
 
 // Test: genericArrayCreationWithSingleIntValue
@@ -975,8 +975,12 @@ namespace PsalmTest_array_assignment_70 {
     $x = [...$a, ...$b, ...$c, ...$shape]; // Shape is last so it overrides previous
     $y = [...$shape, ...$a, ...$b, ...$c]; // Shape is first, but only possibly matching keys union their values
 
-    assertType('array{0: 3, bar: 2, foo: 1, ...<array-key, 4|5|6>}', $x); // SKIP: PHPantom has no unsealed shape type
-    assertType('array{0: 3|4|5|6, bar: 2|6, foo: 1|6, ...<array-key, 4|5|6>}', $y); // SKIP: PHPantom has no unsealed shape type
+    // Psalm keeps `0: 3` in `$x` and widens it to `0: 3|4|5|6` in `$y`, but a
+    // spread renumbers every integer key onto the end: the `3` lands after
+    // whatever came before it in `$x`, and sits at `0` in `$y` because
+    // nothing comes before it there.
+    assertType('array{foo: 1, bar: 2, ...<array-key, 3|4|5|6>}', $x);
+    assertType('array{foo: 1|6, bar: 2|6, 3, ...<array-key, 4|5|6>}', $y);
 }
 
 // Test: AddTwoSealedArrays
