@@ -12,7 +12,7 @@ function foo(array $items) {
 	if (count($items) === 3) {
 		assertType('array{int, int, int}', $items);
 		array_shift($items);
-		assertType('array{int, int}', $items); // SKIP: array_shift() does not drop the first entry of a list shape
+		assertType('array{int, int}', $items);
 	} elseif (count($items) === 0) {
 		assertType('array{}', $items);
 	} elseif (count($items) === 5) {
@@ -31,7 +31,7 @@ function modeCount(array $items, int $mode) {
 	if (count($items, $mode) === 3) {
 		assertType('array{int, int, int}', $items);
 		array_shift($items);
-		assertType('array{int, int}', $items); // SKIP: array_shift() does not drop the first entry of a list shape
+		assertType('array{int, int}', $items);
 	} elseif (count($items, $mode) === 0) {
 		assertType('array{}', $items);
 	} elseif (count($items, $mode) === 5) {
@@ -69,7 +69,7 @@ function normalCount(array $items) {
 	if (count($items, COUNT_NORMAL) === 3) {
 		assertType('array{int, int, int}', $items);
 		array_shift($items);
-		assertType('array{int, int}', $items); // SKIP: array_shift() does not drop the first entry of a list shape
+		assertType('array{int, int}', $items);
 	} elseif (count($items, COUNT_NORMAL) === 0) {
 		assertType('array{}', $items);
 	} elseif (count($items, COUNT_NORMAL) === 5) {
@@ -106,7 +106,7 @@ function normalCountOnMaybeArray(array $items):void {
 	if (count($items, COUNT_NORMAL) === 3) {
 		assertType('array{array<int>|int, array<int>|int, array<int>|int}', $items);
 		array_shift($items);
-		assertType('array{array<int>|int, array<int>|int}', $items); // SKIP: array_shift() does not drop the first entry of a list shape
+		assertType('array{array<int>|int, array<int>|int}', $items);
 	} elseif (count($items, COUNT_NORMAL) === 0) {
 		assertType('array{}', $items);
 	} elseif (count($items, COUNT_NORMAL) === 5) {

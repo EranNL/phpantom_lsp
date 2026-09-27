@@ -769,7 +769,7 @@ function probe(array $weights, array $tallies): void {
             ("$proven", "int"),
             ("$declared", "string"),
             ("$current", "string"),
-            ("$literal", "string"),
+            ("$literal", "'a'"),
         ],
     );
 }

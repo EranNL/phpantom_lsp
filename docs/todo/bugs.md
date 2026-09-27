@@ -26,87 +26,7 @@ No outstanding items.
 
 ## Standard-library return types
 
-### B482. Key functions widen the literal keys of an array literal
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$a = [2 => 1, 3 => 2, 4 => 1];
-array_keys($a);     // should be array{2, 3, 4}, is list<int>
-array_keys($a, 1);  // should be list<2|3|4>, is list<int>
-array_key_last(rand(0, 1) ? [] : ['one', 'two']); // should be 0|1|null, is int|null
-```
-
-The key template is bound from the shape's widened key type. A declared `array<1|2|3, V>` keeps its literal keys, so only the array literal's own keys are lost.
-
-Found porting PHPStan's `nsrt/bug-11928.php` and `nsrt/bug-14081.php`; the assertions are `// SKIP` in the ported copies under `tests/phpstan_nsrt/`.
-
-### B483. `preg_replace()` over an array shape loses its keys
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param array{a: string, b: string} $arr */
-function f(array $arr) {
-    preg_replace('/^a/', 'x', $arr); // should be array{a?: string, b?: string}, is array<array-key, string>
-}
-```
-
-Given an array subject, `preg_replace()` returns the subject's keys (each optional, since an entry whose replacement fails is dropped) with string values.
-
-Found porting PHPStan's `nsrt/bug-11547.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B484. `array_merge()` of array literals does not produce the merged shape
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-array_merge(['foo' => 1, 'bar' => 2], [2, 3]); // should be array{foo: 1, bar: 2, 0: 2, 1: 3}, is array
-```
-
-Merging known shapes has a known result: string keys from later arrays overwrite earlier ones and integer keys are renumbered. Array key completion on the result is where this shows.
-
-Found porting PHPStan's `nsrt/array-merge2.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B485. `array_shift()` does not drop the first entry of a list shape
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param list<int> $items */
-function f(array $items) {
-    if (count($items) === 3) {
-        array_shift($items);
-        $items; // should be array{int, int}, is array{int, int, int}
-    }
-}
-```
-
-The by-reference write leaves the argument as it was. A list shape loses its first entry and the rest move down one key.
-
-Found porting PHPStan's `nsrt/list-count.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B486. `strlen()` of a known literal string is not folded
-**Impact: Low · Complexity: Low**
-
-```php
-$this->foo = '';
-strlen($this->foo); // should be 0, is int<0, max>
-```
-
-A literal argument has a known length, the same way the other scalar folds read one.
-
-Found porting PHPStan's `nsrt/bug-5129.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
-
-### B506. A pointer function passed an empty array widens it to `array|object`
-**Impact: Low · Complexity: Low-Medium**
-
-```php
-$empty = [];
-reset($empty); // false (correct)
-$empty;        // should be array{}, is object|array
-end($empty);   // should be false, is mixed|false
-```
-
-`reset()`, `end()`, `next()` and `prev()` take their array by reference only to move its internal pointer, so the value is the same after the call. The by-reference seeding in `seed_pass_by_ref_primitives` drops an empty shape on purpose (a `preg_match_all()` out-parameter really is overwritten) and falls back to the stub's `array|object`. A non-empty shape survives only because it is a subtype of the hint. The pointer functions need to be marked as leaving their argument's value alone.
-
-Found porting PHPStan's `nsrt/array-pointer-functions.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+No outstanding items.
 
 ## Reachability
 
@@ -174,6 +94,23 @@ if ($x > 0) {
 Integer literal unions are narrowed by `<`, `>`, `<=` and `>=`; float literals are left as they were.
 
 Found porting PHPStan's `nsrt/bug-5309.php`; the assertions are `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
+
+### B509. A false `strlen() > 0` guard does not narrow the string to `''`
+**Impact: Low · Complexity: Medium**
+
+```php
+function f(string $s) {
+    if (strlen($s) > 0) {
+        return;
+    }
+    $s;         // should be '', is string
+    strlen($s); // should be 0, is int<0, max>
+}
+```
+
+A comparison on the length of a string says what the string is: a length of zero is the empty string, a positive one is `non-empty-string`.
+
+Found porting PHPStan's `nsrt/bug-5129.php`; the assertion is `// SKIP` in the ported copy under `tests/phpstan_nsrt/`.
 
 ### B490. `count()` does not size a shape with explicit keys and optional entries
 **Impact: Low · Complexity: Medium**
@@ -265,4 +202,18 @@ No outstanding items.
 
 ## Miscellaneous
 
-No outstanding items.
+### B508. A closure that captures its own variable by reference is typed `null` inside its body
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+$callback = function () use (&$callback, $loop): void {
+    $loop->addTimer(1.0, $callback); // reported: expects callable, got null
+};
+```
+
+PHP creates `$callback` as `null` when the closure literal runs, but the assignment stores the closure into it before the body can ever execute, so inside the body it is the closure. Treating the capture as `null` is right only when nothing assigns the variable afterwards. This appeared with the change that types an undefined by-reference capture as `null`, and shows as three false positives in phpstan-src (`src/Command/FixerApplication.php`, `monitorFileChanges()`).
+
+### B510. An overriding method's narrower return type is lost on some call sites
+**Impact: Medium · Complexity: Unknown**
+
+In pdepend, `ASTMethod::getParent(): ?AbstractASTClassOrInterface` overrides `AbstractASTArtifact::getParent(): ?ASTNode`, yet `$method->getParent()` resolves to the parent's `?ASTNode` at eight call sites (`ClassDependencyAnalyzer.php`, `CodeRankAnalyzer/MethodStrategy.php`, `CouplingAnalyzer.php`, `ASTParameter.php`), plus one in phpmd (`Rule/CleanCode/UndefinedVariable.php`). These all came back in the 2026-09-27 sweep and are present at `063275b0`, so one of that day's earlier commits introduced them. A reduced three-level hierarchy with the same shape resolves correctly, so the trigger has not been isolated yet; bisecting the day's commits against `analyze` on pdepend is the quickest way in.

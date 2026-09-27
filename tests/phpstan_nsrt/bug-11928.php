@@ -9,10 +9,10 @@ function doFoo()
 	$a = [2 => 1, 3 => 2, 4 => 1];
 
 	$keys = array_keys($a, 1); // returns [2, 4]
-	assertType('list<2|3|4>', $keys); // SKIP: array_keys() of an array literal widens its literal keys
+	assertType('list<2|3|4>', $keys);
 
 	$keys = array_keys($a); // returns [2, 3, 4]
-	assertType('array{2, 3, 4}', $keys); // SKIP: array_keys() of an array literal widens its literal keys
+	assertType('array{2, 3, 4}', $keys);
 }
 
 /**
@@ -23,10 +23,10 @@ function doFoo()
 function doFooStrings($unionKeyedArray, $fourOrFive) {
 	$a = [2 => 'hi', 3 => '123', 'xy' => 5];
 	$keys = array_keys($a, 1);
-	assertType("list<2|3|'xy'>", $keys); // SKIP: array_keys() of an array literal widens its literal keys
+	assertType("list<2|3|'xy'>", $keys);
 
 	$keys = array_keys($a);
-	assertType("array{2, 3, 'xy'}", $keys); // SKIP: array_keys() of an array literal widens its literal keys
+	assertType("array{2, 3, 'xy'}", $keys);
 
 	$keys = array_keys($unionKeyedArray, 1);
 	assertType("list<1|2|3>", $keys); // could be array{}

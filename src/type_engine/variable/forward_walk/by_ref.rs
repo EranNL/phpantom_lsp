@@ -520,6 +520,7 @@ pub(crate) fn process_pass_by_ref<'b>(
         .collect();
 
     if !super::array_assignment::process_array_push_call(expr, scope, ctx)
+        && !super::array_assignment::process_array_cursor_call(expr, scope, ctx)
         && !process_extract_call(expr, scope, ctx)
     {
         apply_by_ref_parameter_types(expr, scope, ctx);
@@ -997,6 +998,11 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
     // `preg_match`'s `$matches` has no other by-reference parameter beside
     // it, so nothing below is left to do once the pattern has typed it.
     if seed_preg_matches(expr, scope, ctx) {
+        return;
+    }
+    // Moving the internal pointer leaves the array's value as it was, so
+    // the `array|object` hint describes nothing the call wrote.
+    if super::array_assignment::is_array_pointer_call(expr) {
         return;
     }
 

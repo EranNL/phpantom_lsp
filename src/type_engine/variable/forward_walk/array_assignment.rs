@@ -304,6 +304,86 @@ pub(crate) fn process_array_push_call<'b>(
     true
 }
 
+/// Process the calls that take an array by reference and either leave its
+/// value alone (`reset()`, `end()`, `next()`, `prev()` only move the
+/// internal pointer) or drop one entry from an end (`array_shift()`,
+/// `array_pop()`).
+///
+/// Returns whether `expr` was handled, so the by-reference pass does not
+/// reset the variable to the parameter's `array|object` hint. A removal
+/// from something that is not an array is left to that pass.
+pub(crate) fn process_array_cursor_call<'b>(
+    expr: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) -> bool {
+    let Some((name, call)) = called_function(expr) else {
+        return false;
+    };
+    let from_front = if is_array_pointer_function(name) {
+        None
+    } else if name.eq_ignore_ascii_case("array_shift") {
+        Some(true)
+    } else if name.eq_ignore_ascii_case("array_pop") {
+        Some(false)
+    } else {
+        return false;
+    };
+    let mut args = call.argument_list.arguments.iter();
+    let (Some(Argument::Positional(target)), None) = (args.next(), args.next()) else {
+        return false;
+    };
+    let Expression::Variable(Variable::Direct(dv)) = target.value else {
+        return false;
+    };
+    if target.ellipsis.is_some() {
+        return false;
+    }
+    let Some(from_front) = from_front else {
+        return true;
+    };
+    let base_name = bytes_to_str(dv.name);
+    let base_types = scope.get(base_name);
+    if base_types.is_empty() {
+        return false;
+    }
+    let base_type = ResolvedType::types_joined(base_types);
+    if !base_type.is_array_like() {
+        return false;
+    }
+    // The walker re-walks a loop body until it settles, and a shape that
+    // loses an entry on every pass never does.
+    let result = (!ctx.in_loop)
+        .then(|| super::super::array_shape_writes::apply_array_remove_end(&base_type, from_front))
+        .flatten()
+        .unwrap_or_else(|| super::super::array_shape_writes::after_unknown_removal(&base_type));
+    scope.set(base_name, vec![ResolvedType::from_type_string(result)]);
+    true
+}
+
+/// Whether `expr` calls `reset()`, `end()`, `next()` or `prev()`, which
+/// take their array by reference only to move its internal pointer.
+pub(crate) fn is_array_pointer_call(expr: &Expression<'_>) -> bool {
+    called_function(expr).is_some_and(|(name, _)| is_array_pointer_function(name))
+}
+
+fn is_array_pointer_function(name: &str) -> bool {
+    ["reset", "end", "next", "prev"]
+        .iter()
+        .any(|f| f.eq_ignore_ascii_case(name))
+}
+
+/// The bare name and call node of a plain `name(…)` function call.
+fn called_function<'a, 'b>(expr: &'a Expression<'b>) -> Option<(&'b str, &'a FunctionCall<'b>)> {
+    let Expression::Call(Call::Function(call)) = expr else {
+        return None;
+    };
+    let Expression::Identifier(ident) = call.function else {
+        return None;
+    };
+    Some((bytes_to_str(ident.value()).trim_start_matches('\\'), call))
+}
+
 /// Merge the value of an element write into the base variable's type.
 ///
 /// `key_chain` holds the array-access keys from outermost to innermost;

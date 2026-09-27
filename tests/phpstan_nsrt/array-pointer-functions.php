@@ -46,7 +46,7 @@ class Foo
 		assertType('mixed', end());
 		assertType('stdClass|false', end($generalArray));
 		assertType('mixed', end($somethingElse));
-		assertType('false', end($emptyConstantArray)); // SKIP: a pointer function passed an empty array literal widens it to `array|object`
+		assertType('false', end($emptyConstantArray));
 		assertType('1|2', end($constantArray));
 		assertType('\'bar\'|\'baz\'|\'foo\'', end($secondConditionalArray));
 		assertType('0|1|2', end($constantArrayOptionalKeys1));

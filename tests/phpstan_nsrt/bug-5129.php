@@ -12,20 +12,20 @@ class HelloWorld
 	public function sayHello(string $s): void
 	{
 		$this->foo = '';
-		assertType('0', strlen($this->foo)); // SKIP: strlen() of a known literal string is not folded
+		assertType('0', strlen($this->foo));
 		if (strlen($this->foo) > 0) {
 			return;
 		}
 
-		assertType('0', strlen($this->foo)); // SKIP: strlen() of a known literal string is not folded
+		assertType('0', strlen($this->foo));
 
 		$this->foo = 'x';
-		assertType('1', strlen($this->foo)); // SKIP: strlen() of a known literal string is not folded
+		assertType('1', strlen($this->foo));
 		if (strlen($this->foo) > 0) {
 			return;
 		}
 
-		assertType('0', strlen($this->foo)); // SKIP: strlen() of a known literal string is not folded
+		assertType('0', strlen($this->foo)); // SKIP: a false `strlen() > 0` guard does not narrow the string to `''`
 
 		$this->foo = $s;
 		assertType('int<0, max>', strlen($this->foo));

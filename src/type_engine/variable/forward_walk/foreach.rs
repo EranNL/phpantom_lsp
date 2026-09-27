@@ -229,10 +229,13 @@ pub(crate) fn iterable_ctx<'a>(
 /// Clearing the entry first also drops the synthetic `$step['fo']` keys
 /// and the proofs recorded against them, which the rebinding invalidates
 /// whether or not a type replaces them.
+///
+/// Without a `pre_loop_scope` the target is left unbound, which is what a
+/// loop over an array known to be empty gives it: no entry ever reaches it.
 pub(crate) fn reset_foreach_target(
     expr: &Expression<'_>,
     scope: &mut ScopeState,
-    pre_loop_scope: &ScopeState,
+    pre_loop_scope: Option<&ScopeState>,
 ) {
     let inner = if let Expression::UnaryPrefix(up) = expr
         && matches!(up.operator, UnaryPrefixOperator::Reference(_))
@@ -246,7 +249,9 @@ pub(crate) fn reset_foreach_target(
             let var_name = bytes_to_str(dv.name);
             scope.remove(var_name);
             scope.invalidate_dependent_keys(var_name);
-            if pre_loop_scope.contains(var_name) {
+            if let Some(pre_loop_scope) = pre_loop_scope
+                && pre_loop_scope.contains(var_name)
+            {
                 let before = pre_loop_scope.get(var_name);
                 if before.is_empty() {
                     scope.set_empty(var_name);
@@ -274,7 +279,7 @@ pub(crate) fn reset_foreach_target(
 fn reset_foreach_destructured_element(
     elem: &ArrayElement<'_>,
     scope: &mut ScopeState,
-    pre_loop_scope: &ScopeState,
+    pre_loop_scope: Option<&ScopeState>,
 ) {
     match elem {
         ArrayElement::KeyValue(kv) => reset_foreach_target(kv.value, scope, pre_loop_scope),
@@ -542,14 +547,28 @@ pub(crate) fn process_foreach<'b>(
     // accumulator before anything has been written to it, and the
     // unresolved element types that walk produces would be unioned into
     // the accumulator for good, so the element type never converges.
+    //
+    // No entry is ever bound to the targets either, so the body does not
+    // see whatever an outer variable of the same name held before the loop.
     if iter_type
         .as_ref()
         .is_some_and(|it| it.is_empty_array_shape())
     {
+        match &foreach.target {
+            ForeachTarget::Value(val) => reset_foreach_target(val.value, scope, None),
+            ForeachTarget::KeyValue(kv) => {
+                reset_foreach_target(kv.key, scope, None);
+                reset_foreach_target(kv.value, scope, None);
+            }
+        }
         let exit_frame = ExitFrameGuard::push();
         walk_body_forward(body_stmts.iter().copied(), scope, &loop_body_ctx);
         exit_frame.pop();
-        *scope = pre_loop_scope;
+        // A cursor inside the body is answered by the walk that stopped at
+        // it, as for any other loop below.
+        if !(cursor_in_body && !is_diagnostic_scope_active()) {
+            *scope = pre_loop_scope;
+        }
         return;
     }
 
@@ -579,12 +598,12 @@ pub(crate) fn process_foreach<'b>(
             // discarding what the previous one wrote to them.
             match &foreach.target {
                 ForeachTarget::Value(val) => {
-                    reset_foreach_target(val.value, next_scope, &pre_loop_scope);
+                    reset_foreach_target(val.value, next_scope, Some(&pre_loop_scope));
                     bind_foreach_value(val.value, &iter_type, next_scope, ctx);
                 }
                 ForeachTarget::KeyValue(kv) => {
-                    reset_foreach_target(kv.key, next_scope, &pre_loop_scope);
-                    reset_foreach_target(kv.value, next_scope, &pre_loop_scope);
+                    reset_foreach_target(kv.key, next_scope, Some(&pre_loop_scope));
+                    reset_foreach_target(kv.value, next_scope, Some(&pre_loop_scope));
                     bind_foreach_key(kv.key, &iter_type, next_scope, ctx);
                     bind_foreach_value(kv.value, &iter_type, next_scope, ctx);
                 }

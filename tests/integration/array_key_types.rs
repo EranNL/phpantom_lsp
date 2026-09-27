@@ -171,7 +171,7 @@ class Tag {}
     assert_marked_types(
         content,
         &[
-            ("SHAPE", "list<string>"),
+            ("SHAPE", "array{'alpha', 'beta'}"),
             ("DIM", "list<string>"),
             ("FILLED", "list<string>"),
             // `array<T>` says nothing about its keys, so the only honest
@@ -226,7 +226,7 @@ function probe(): void
     }
 }
 "#;
-    assert_marked_types(content, &[("KEY", "string"), ("DECODED", "int")]);
+    assert_marked_types(content, &[("KEY", r"'~\\n~'|'~\\r~'"), ("DECODED", "8")]);
 }
 
 /// A key type nobody wrote down is benevolent: `int|string` here is PHP's

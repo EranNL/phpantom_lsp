@@ -35,7 +35,8 @@ function maybeNonEmpty(): void
 	}
 	assertType("array{}|array{'one', 'two'}", $array);
 	$key = array_key_last($array);
-	assertType('0|1|null', $key); // SKIP: array_key_last() of an array literal widens its literal keys
+	// PHPantom is more precise than PHPStan here: the last key of `['one', 'two']` is always 1, so the upstream `0|1|null` names a key the call never returns.
+	assertType('1|null', $key);
 	// PHPantom is more precise than PHPStan here: when the array is the empty one, the key is null and the read finds nothing, which is null at runtime.
 	assertType("'one'|'two'|null", $array[$key]);
 }

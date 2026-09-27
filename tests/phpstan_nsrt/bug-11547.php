@@ -24,7 +24,7 @@ function foobar(string $s, string $pattern)
 function bar(array $arr): array
 {
 	$r = preg_replace('/^a/', 'x', $arr);
-	assertType('array{a?: string, b?: string}', $r); // SKIP: preg_replace() over an array shape loses its keys
+	assertType('array{a?: string, b?: string}', $r);
 	return $r;
 }
 
@@ -34,7 +34,7 @@ function bar(array $arr): array
 function barbar($arr, string $pattern)
 {
 	$r = preg_replace($pattern, 'b', $arr);
-	assertType('array{a?: string, b?: string}', $r); // SKIP: preg_replace() over an array shape loses its keys
+	assertType('array{a?: string, b?: string}', $r);
 	return $r;
 }
 

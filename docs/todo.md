@@ -105,15 +105,12 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
-| B484 | [`array_merge()` of array literals does not produce the merged shape](todo/bugs.md#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape) | Low-Medium | Medium |
+| B508 | [A closure that captures its own variable by reference is typed `null` inside its body](todo/bugs.md#b508-a-closure-that-captures-its-own-variable-by-reference-is-typed-null-inside-its-body) | Medium | Low-Medium |
+| B510 | [An overriding method's narrower return type is lost on some call sites](todo/bugs.md#b510-an-overriding-methods-narrower-return-type-is-lost-on-some-call-sites) | Medium | Unknown |
 | B507 | [An assertion on a value typed as a union of classes and `null` leaves the `null`](todo/bugs.md#b507-an-assertion-on-a-value-typed-as-a-union-of-classes-and-null-leaves-the-null) | Low-Medium | Low-Medium |
-| B506 | [A pointer function passed an empty array widens it to `array\|object`](todo/bugs.md#b506-a-pointer-function-passed-an-empty-array-widens-it-to-arrayobject) | Low | Low-Medium |
-| B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
-| B482 | [Key functions widen the literal keys of an array literal](todo/bugs.md#b482-key-functions-widen-the-literal-keys-of-an-array-literal) | Low | Low-Medium |
 | B488 | [A call proved through `?->` stays narrowed under its `->` spelling when the method is impure](todo/bugs.md#b488-a-call-proved-through---stays-narrowed-under-its---spelling-when-the-method-is-impure) | Low | Low-Medium |
 | B491 | [The receiver of a nullsafe call is not narrowed inside its arguments](todo/bugs.md#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments) | Low | Low-Medium |
-| B483 | [`preg_replace()` over an array shape loses its keys](todo/bugs.md#b483-preg_replace-over-an-array-shape-loses-its-keys) | Low | Medium |
-| B485 | [`array_shift()` does not drop the first entry of a list shape](todo/bugs.md#b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape) | Low | Medium |
+| B509 | [A false `strlen() > 0` guard does not narrow the string to `''`](todo/bugs.md#b509-a-false-strlen--0-guard-does-not-narrow-the-string-to-) | Low | Medium |
 | B487 | [An impure call does not forget what was proved about a static property](todo/bugs.md#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property) | Low | Medium |
 | B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
 | B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |

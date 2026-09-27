@@ -719,6 +719,55 @@ fn unshift_into_shape(entries: &[ShapeEntry], front: Vec<PhpType>) -> Option<Php
     Some(PhpType::array_shape(shifted))
 }
 
+/// The shape `array_shift($base)` or `array_pop($base)` leaves behind.
+///
+/// `array_shift()` drops the first entry and renumbers the integer keys
+/// from zero, leaving the string keys alone; `array_pop()` drops the last
+/// entry and renumbers nothing. An empty shape has nothing to drop. `None`
+/// when `base` is not a single shape or an optional entry leaves which one
+/// goes, or how the rest are numbered, unknown.
+pub(super) fn apply_array_remove_end(base: &PhpType, from_front: bool) -> Option<PhpType> {
+    let TypeKind::ArrayShape(entries) = base.kind() else {
+        return None;
+    };
+    let rest = match (from_front, entries.as_ref()) {
+        (_, []) => return Some(base.clone()),
+        (true, [first, rest @ ..]) if !first.optional => unshift_into_shape(rest, Vec::new())?,
+        (false, [rest @ .., last]) if !last.optional => PhpType::array_shape(rest.to_vec()),
+        _ => return None,
+    };
+    Some(if base.is_list_shape() {
+        PhpType::as_list_shape(rest)
+    } else {
+        rest
+    })
+}
+
+/// `base` after one entry was removed from an end, when the shape rewrite
+/// in [`apply_array_remove_end`] cannot say which.
+///
+/// A shape becomes the container it describes, and a `non-empty-`
+/// refinement goes, since the entry removed may have been the only one.
+pub(super) fn after_unknown_removal(base: &PhpType) -> PhpType {
+    let members = base
+        .union_members()
+        .into_iter()
+        .map(|member| {
+            let member = member.generalized_array().widen_scalar_literals();
+            match member.kind() {
+                TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("non-empty-list") => {
+                    PhpType::generic("list", g.args.to_vec())
+                }
+                TypeKind::Generic(g) if g.name.eq_ignore_ascii_case("non-empty-array") => {
+                    PhpType::generic("array", g.args.to_vec())
+                }
+                _ => member,
+            }
+        })
+        .collect();
+    PhpType::join_runtime_value_types(members)
+}
+
 /// `base` after an unknown number of `$base[] = $value` appends, none
 /// included. `value` is stored as given, literals included.
 fn push_any_number(base: &PhpType, value: &PhpType) -> PhpType {

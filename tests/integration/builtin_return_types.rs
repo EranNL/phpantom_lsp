@@ -563,3 +563,128 @@ function probe($x = null): void {
 "#;
     assert_assigned_types(content, &[("$args", "list<mixed>")]);
 }
+
+/// `array_shift()` and `array_pop()` take the entry at their end of a shape
+/// and leave the rest behind, renumbering the integer keys only for a
+/// shift. An optional entry at that end may be the one taken, or may be
+/// missing, in which case the call reaches past it.
+#[test]
+fn removers_take_the_entry_at_their_end_of_a_shape() {
+    let content = r#"<?php
+/** @param array{a?: int, b: string} $maybe */
+function probe(array $maybe): void {
+    $list = [1, 2, 3];
+    $first = array_shift($list);
+    $shifted = $list;
+    $last = array_pop($list);
+    $popped = $list;
+    $keyed = ['a' => 'x', 5 => true, 9 => 1.5];
+    array_shift($keyed);
+    $renumbered = $keyed;
+    $either = array_shift($maybe);
+    $none = [];
+    $nothing = array_pop($none);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "1"),
+            ("$shifted", "array{2, 3}"),
+            ("$last", "3"),
+            ("$popped", "array{2}"),
+            ("$renumbered", "array{true, 1.5}"),
+            ("$either", "int|string"),
+            ("$nothing", "null"),
+        ],
+    );
+}
+
+/// A loop body is walked until the variables settle, which a shape that
+/// loses an entry on every pass never does, so a removal inside one leaves
+/// the container the shape describes.
+#[test]
+fn a_removal_in_a_loop_leaves_the_container() {
+    let content = r#"<?php
+function probe(): void {
+    $queue = [1, 2, 3];
+    while (rand(0, 1)) {
+        array_shift($queue);
+        $inLoop = $queue;
+    }
+}
+"#;
+    assert_assigned_types(content, &[("$inLoop", "list<1|2|3>")]);
+}
+
+/// The pointer functions take their array by reference only to move its
+/// internal pointer, so the variable keeps the value it had.
+#[test]
+fn pointer_functions_leave_the_array_alone() {
+    let content = r#"<?php
+function probe(): void {
+    $empty = [];
+    reset($empty);
+    next($empty);
+    $stillEmpty = $empty;
+    $pair = ['a' => 1, 'b' => 2];
+    if (end($pair)) {
+        $unchanged = $pair;
+    }
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$stillEmpty", "array{}"),
+            ("$unchanged", "array{a: 1, b: 2}"),
+        ],
+    );
+}
+
+/// The first and last key of a shape are known from its literal keys, down
+/// to the optional entries that may or may not stand in front of them.
+#[test]
+fn end_keys_of_a_shape_are_its_literal_keys() {
+    let content = r#"<?php
+/**
+ * @param array{a?: int, b: int, c?: int} $partial
+ * @param array{x?: int} $sparse
+ */
+function probe(array $partial, array $sparse): void {
+    $first = array_key_first($partial);
+    $last = array_key_last($partial);
+    $maybe = array_key_first($sparse);
+    $keys = array_keys($partial);
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$first", "'a'|'b'"),
+            ("$last", "'c'|'b'"),
+            ("$maybe", "'x'|null"),
+            ("$keys", "list<'a'|'b'|'c'>"),
+        ],
+    );
+}
+
+/// The length of a literal string is a literal too.
+#[test]
+fn strlen_of_a_literal_is_folded() {
+    let content = r#"<?php
+function probe(bool $flag): void {
+    $three = strlen('abc');
+    $either = mb_strlen($flag ? 'ab' : 'abcd');
+    $withEncoding = mb_strlen('abc', 'UTF-8');
+}
+"#;
+    assert_assigned_types(
+        content,
+        &[
+            ("$three", "3"),
+            ("$either", "2|4"),
+            ("$withEncoding", "int"),
+        ],
+    );
+}

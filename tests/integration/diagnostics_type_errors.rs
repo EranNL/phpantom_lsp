@@ -12839,3 +12839,30 @@ function f(Item $item, ?A $p): void {
     let messages = messages_with_code(&collect_slow(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
 }
+
+/// A loop over an array known to be empty never binds its value variable,
+/// so the body must not see what a same-named variable held before it.
+#[test]
+fn a_loop_over_an_empty_array_does_not_bind_the_outer_value() {
+    let php = r#"<?php
+final class GeneratedConfig { public const EXTENSIONS = []; }
+function maybe(): ?string { return null; }
+function probe(array $lookup): bool {
+    $package = maybe();
+    foreach (array_keys(GeneratedConfig::EXTENSIONS) as $package) {
+        if (array_key_exists($package, $lookup)) {
+            return true;
+        }
+    }
+    return false;
+}
+"#;
+    let slow = collect_diagnostics_with(
+        &create_test_backend_with_full_stubs(),
+        php,
+        Backend::collect_slow_diagnostics,
+    );
+    assert!(!has_type_error(&slow), "slow: {slow:#?}");
+    let diags = collect_with_full_stubs(php);
+    assert!(!has_type_error(&diags), "{diags:#?}");
+}
