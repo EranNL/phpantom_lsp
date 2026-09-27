@@ -151,11 +151,7 @@ fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
         write("array{string, bool}", vec![slot(5)], "int"),
         "array{string, bool, 5: int}"
     );
-    // An empty shape has no arity to keep.
-    assert_eq!(
-        write("array{}", vec![slot(0)], "int"),
-        "non-empty-array<int, int>"
-    );
+    assert_eq!(write("array{}", vec![slot(0)], "int"), "array{int}");
     assert_eq!(
         write(
             "array<string, array{string, bool, string}>",

@@ -42,8 +42,8 @@ namespace PsalmTest_list_4 {
      */
     list($a, list($b, $c)) = getMixed();
 
-    assertType('mixed', $a); // SKIP: destructuring an untyped call's result keeps each target's earlier value
-    assertType('mixed', $b); // SKIP: destructuring an untyped call's result keeps each target's earlier value
+    assertType('mixed', $a);
+    assertType('mixed', $b);
     assertType('mixed', $c);
 }
 

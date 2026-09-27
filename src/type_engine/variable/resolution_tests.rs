@@ -696,11 +696,11 @@ function test(bool $flag, string $key, $iterator, $union_iterator) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$spread"),
-        "list<'draft'>"
+        "array{'draft'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$tuple_spread"),
-        "list<'left'|'right'>"
+        "array{'left', 'right'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$mapped"),
@@ -888,7 +888,7 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
 
     assert_eq!(
         resolve_literal_test_var(content, "$int_map"),
-        "non-empty-array<int, 'x'>"
+        "array{1: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$float_map"),
@@ -896,7 +896,7 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$union_map"),
-        "non-empty-array<int|string, 'x'>"
+        "array{1: 'x'}|array{id: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$null_map"),
@@ -908,11 +908,11 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
     );
     assert_eq!(
         resolve_literal_test_var(content, "$decimal_string_map"),
-        "non-empty-array<int, 'x'>"
+        "array{8: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$leading_zero_map"),
-        "non-empty-array<string, 'x'>"
+        "array{'08': 'x'}"
     );
     // A broad `string` key stays `string`: only a *literal* decimal-integer
     // string is known to become an int key at runtime.
@@ -920,24 +920,24 @@ function test(bool $flag, ?int $nullable_key, string $broad_string_key) {
         resolve_literal_test_var(content, "$broad_string_map"),
         "non-empty-array<string, 'x'>"
     );
-    // `(string) 1` folds to `'1'`, which PHP stores as the integer key `1`;
-    // an int-typed step expression keeps its own key domain rather than
-    // falling back to `array-key`.
+    // `(string) 1` folds to `'1'`, which PHP stores as the integer key `1`.
     assert_eq!(
         resolve_literal_test_var(content, "$cast_map"),
-        "non-empty-array<int, 'x'>"
+        "array{1: 'x'}"
     );
+    // An int-typed step expression keeps its own key domain rather than
+    // falling back to `array-key`.
     assert_eq!(
         resolve_literal_test_var(content, "$pre_increment_map"),
         "non-empty-array<int, 'x'>"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$post_increment_map"),
-        "non-empty-array<int, 'x'>"
+        "array{'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_decimal_map"),
-        "non-empty-array<int, 'x'>"
+        "array{8: 'x'}"
     );
     assert_eq!(
         resolve_literal_test_var(content, "$direct_negative_map"),
@@ -1300,9 +1300,9 @@ function test() {
     );
 }
 
-/// Numeric keys in `$var[0] = expr` should NOT be treated as shape entries.
+/// Integer-literal writes onto `[]` build the shape PHP builds.
 #[test]
-fn resolve_var_numeric_key_not_tracked_as_shape() {
+fn resolve_var_numeric_key_writes_build_a_shape() {
     let content = r#"<?php
 function test() {
     $data = [];
@@ -1311,31 +1311,39 @@ function test() {
     echo $data;
 }
 "#;
-    let cursor_offset = content.find("echo $data").unwrap() as u32;
-
-    let results = super::resolve_variable_types(
-        "$data",
-        &ClassInfo::default(),
-        &[],
-        content,
-        cursor_offset,
-        &|_| None,
-        None,
-        Loaders::default(),
+    assert_eq!(
+        resolve_literal_test_var(content, "$data"),
+        "array{'hello', 42}"
     );
+}
 
-    // Numeric keys are not shape entries, so the type should stay as
-    // the base `array` from `$data = []`.  The results may be empty
-    // (just `array`) or contain `array` as a type string.
-    let ts = if results.is_empty() {
-        "array".to_string()
-    } else {
-        ResolvedType::types_joined(&results).to_string()
-    };
-    assert!(
-        !ts.contains('{'),
-        "Numeric keys should not produce a shape, got: {ts}"
+/// A spread whose values are not known leaves the literal's values unknown,
+/// rather than just the ones written beside it.
+#[test]
+fn spreading_an_untyped_array_keeps_its_values_unknown() {
+    let content = r#"<?php
+function test($rest) {
+    $merged = ['a' => 1, ...$rest];
+    echo $merged;
+}
+"#;
+    assert_eq!(
+        resolve_literal_test_var(content, "$merged"),
+        "array<array-key, mixed>"
     );
+}
+
+/// Destructuring a union with no `null` in it reads each member's element.
+#[test]
+fn destructuring_a_non_nullable_union_reads_every_member() {
+    let content = r#"<?php
+/** @param array{int}|array{string} $pair */
+function test(array $pair) {
+    [$first] = $pair;
+    echo $first;
+}
+"#;
+    assert_eq!(resolve_literal_test_var(content, "$first"), "int|string");
 }
 
 #[test]

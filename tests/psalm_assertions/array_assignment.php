@@ -20,8 +20,8 @@ namespace PsalmTest_array_assignment_1 {
         $resultOpt[$k] = true;
     }
 
-    assertType('array{a: true, b: true}', $result); // SKIP: a key taken from iterating a literal list does not build a shape
-    assertType('array{a?: true, b?: true}', $resultOpt); // SKIP: a key taken from iterating a literal list does not build a shape
+    assertType('array{a: true, b: true}', $result);
+    assertType('array{a?: true, b?: true}', $resultOpt);
 }
 
 // Test: assignUnionOfLiteralsClassKeys
@@ -39,7 +39,7 @@ namespace PsalmTest_array_assignment_2 {
         $vv = new $k;
     }
 
-    assertType('array{a::class: true, b::class: true}', $result); // SKIP: a key taken from iterating a literal list does not build a shape
+    assertType('array{a::class: true, b::class: true}', $result); // SKIP: `a::class` is typed as `class-string<a>`, not the literal class name
 }
 
 // Test: genericArrayCreationWithSingleIntValue
@@ -137,10 +137,11 @@ namespace PsalmTest_array_assignment_8 {
         $bat[$text] = $bar[$i];
     }
 
-    assertType('array{0: string, 1: string, 2: string}', $foo); // SKIP: writing a literal int key into an empty array builds a generic array instead of a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{"a", "b", "c"}', $foo);
     // PHPantom keeps the literal values Psalm's assertion widens to their base type.
     assertType('array{0, 1, 2}', $bar);
-    assertType('array{a: int, b: int, c: int}', $bat); // SKIP: a key taken from iterating a literal list does not build a shape
+    assertType('array{a: int, b: int, c: int}', $bat);
 }
 
 // Test: implicitStringArrayCreation
@@ -384,7 +385,8 @@ namespace PsalmTest_array_assignment_30 {
     $b[$string] = 5;
     $b[0] = 3;
 
-    assertType('array{0: int, c: int}', $b); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{c: 5, 3}', $b);
 }
 
 // Test: updateStringIntKey3
@@ -396,7 +398,8 @@ namespace PsalmTest_array_assignment_31 {
     $c[0] = 3;
     $c[$string] = 5;
 
-    assertType('array{0: int, c: int}', $c); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{3, c: 5}', $c);
 }
 
 // Test: updateStringIntKey4
@@ -408,7 +411,8 @@ namespace PsalmTest_array_assignment_32 {
     $d[$int] = 3;
     $d["a"] = 5;
 
-    assertType('array{5: int, a: int}', $d); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{5: 3, a: 5}', $d);
 }
 
 // Test: updateStringIntKey5
@@ -421,7 +425,8 @@ namespace PsalmTest_array_assignment_33 {
     $e[$int] = 3;
     $e[$string] = 5;
 
-    assertType('array{5: int, c: int}', $e); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{5: 3, c: 5}', $e);
 }
 
 // Test: updateStringIntKeyWithIntRootAndNumberOffset
@@ -434,7 +439,8 @@ namespace PsalmTest_array_assignment_34 {
     $a[0]["a"] = 5;
     $a[0][0] = 3;
 
-    assertType('array{0: array{0: int, a: int}}', $a); // SKIP: writing a literal int key into an empty array builds a generic array instead of a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{array{a: 5, 3}}', $a);
 }
 
 // Test: updateStringIntKeyWithIntRoot
@@ -462,10 +468,11 @@ namespace PsalmTest_array_assignment_35 {
     $e[0][$int] = 3;
     $e[0][$string] = 5;
 
-    assertType('array{0: array{0: int, c: int}}', $b); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{0: array{0: int, c: int}}', $c); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{0: array{5: int, a: int}}', $d); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{0: array{5: int, c: int}}', $e); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{array{c: 5, 3}}', $b);
+    assertType('array{array{3, c: 5}}', $c);
+    assertType('array{array{5: 3, a: 5}}', $d);
+    assertType('array{array{5: 3, c: 5}}', $e);
 }
 
 // Test: updateStringIntKeyWithTKeyedArrayRootAndNumberOffset
@@ -507,10 +514,11 @@ namespace PsalmTest_array_assignment_37 {
     $e["root"][$int] = 3;
     $e["root"][$string] = 5;
 
-    assertType('array{root: array{0: int, c: int}}', $b); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{root: array{0: int, c: int}}', $c); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{root: array{5: int, a: int}}', $d); // SKIP: a key held in a variable with a literal value does not build a shape
-    assertType('array{root: array{5: int, c: int}}', $e); // SKIP: a key held in a variable with a literal value does not build a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{root: array{c: 5, 3}}', $b);
+    assertType('array{root: array{3, c: 5}}', $c);
+    assertType('array{root: array{5: 3, a: 5}}', $d);
+    assertType('array{root: array{5: 3, c: 5}}', $e);
 }
 
 // Test: changeTKeyedArrayType
@@ -639,7 +647,8 @@ namespace PsalmTest_array_assignment_46 {
     $f = [];
     $f[0] = "hello";
 
-    assertType('array{0: string}', $f); // SKIP: writing a literal int key into an empty array builds a generic array instead of a shape
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{"hello"}', $f);
 }
 
 // Test: dontIncrementIntOffsetForKeyedItems
@@ -784,9 +793,10 @@ namespace PsalmTest_array_assignment_56 {
     $arr2 = [...$arr1];
     $arr3 = [1 => 0, ...$arr1];
 
-    assertType('list{int, int, int, int, int, int, int, int}', $result); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
-    assertType('list{int, int, int}', $arr2); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
-    assertType('array{1: int, 2: int, 3: int, 4: int}', $arr3); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    // PHPantom keeps the literal values Psalm's assertion widens to their base type.
+    assertType('array{0, 1, 2, 3, 4, 5, 6, 7}', $result);
+    assertType('array{1, 2, 3}', $arr2);
+    assertType('array{1: 0, 2: 1, 3: 2, 4: 3}', $arr3);
 }
 
 // Test: arraySpreadWithString
@@ -798,7 +808,7 @@ namespace PsalmTest_array_assignment_57 {
         ...["b" => 2]
     ];
 
-    assertType('array{a: 1, b: 2}', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array{a: 1, b: 2}', $x);
 }
 
 // Test: constantArraySpreadWithString
@@ -873,7 +883,7 @@ namespace PsalmTest_array_assignment_62 {
 
     $x = [...$x, ...$y];
 
-    assertType('array<never, never>', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array<never, never>', $x);
 }
 
 // Test: unpackListCanBeEmpty
@@ -897,7 +907,7 @@ namespace PsalmTest_array_assignment_65 {
 
     $e = [...$a, ...$b, ...$c, ...$d, 3];
 
-    assertType('list{1, 2, 3}', $e); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('list{1, 2, 3}', $e);
 }
 
 // Test: unpackArrayCanBeEmpty
@@ -910,7 +920,7 @@ namespace PsalmTest_array_assignment_66 {
 
     $x = [...$x, ...$y];
 
-    assertType('array<array-key, int>', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array<array-key, int>', $x);
 }
 
 // Test: unpackIntKeyedArrayResultsInList
@@ -935,7 +945,7 @@ namespace PsalmTest_array_assignment_68 {
 
     $x = [...$x, ...$y];
 
-    assertType('array<array-key, int>', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array<array-key, int>', $x);
 }
 
 // Test: unpackLiteralStringKeyedArrayPhp8.1
@@ -948,7 +958,7 @@ namespace PsalmTest_array_assignment_69 {
 
     $x = [...$x, ...$y];
 
-    assertType('array<\'bar\'|\'baz\'|\'foo\', int>', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array<\'bar\'|\'baz\'|\'foo\', int>', $x);
 }
 
 // Test: unpackArrayShapesUnionsLaterUnpacks
@@ -965,8 +975,8 @@ namespace PsalmTest_array_assignment_70 {
     $x = [...$a, ...$b, ...$c, ...$shape]; // Shape is last so it overrides previous
     $y = [...$shape, ...$a, ...$b, ...$c]; // Shape is first, but only possibly matching keys union their values
 
-    assertType('array{0: 3, bar: 2, foo: 1, ...<array-key, 4|5|6>}', $x); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
-    assertType('array{0: 3|4|5|6, bar: 2|6, foo: 1|6, ...<array-key, 4|5|6>}', $y); // SKIP: array spread builds a list instead of the shape it spreads, and drops string keys
+    assertType('array{0: 3, bar: 2, foo: 1, ...<array-key, 4|5|6>}', $x); // SKIP: PHPantom has no unsealed shape type
+    assertType('array{0: 3|4|5|6, bar: 2|6, foo: 1|6, ...<array-key, 4|5|6>}', $y); // SKIP: PHPantom has no unsealed shape type
 }
 
 // Test: AddTwoSealedArrays
@@ -1003,8 +1013,8 @@ namespace PsalmTest_array_assignment_72 {
 
     [$_foo, $_bar] = foobar();
 
-    assertType('\'foo\'|null', $_foo); // SKIP: destructuring a nullable shape drops the null
-    assertType('\'bar\'|null', $_bar); // SKIP: destructuring a nullable shape drops the null
+    assertType('\'foo\'|null', $_foo);
+    assertType('\'bar\'|null', $_bar);
 }
 
 // Test: listAppendShape

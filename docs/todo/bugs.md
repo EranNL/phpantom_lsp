@@ -49,144 +49,55 @@ No outstanding items.
 
 ## Array types
 
-### B519. Array spread builds a list instead of the shape it spreads, and drops string keys
+### B537. An array of unknown length spread after known entries loses them
 
-**Impact: Medium · Complexity: Medium**
-
-```php
-$arrayA = [1, 2, 3];
-$arrayB = [4, 5];
-$result = [0, ...$arrayA, ...$arrayB, 6, 7];
-// list<0|1|2|3|4|5|6|7>, should be array{0, 1, 2, 3, 4, 5, 6, 7}
-
-$arr1 = [3 => 1, 1 => 2, 3];
-$arr3 = [1 => 0, ...$arr1];
-// array{1: 0}, should be array{1: 0, 2: 1, 3: 2, 4: 3}
-
-$x = ['a' => 0, ...['a' => 1], ...['b' => 2]];
-// array{a: 0}, should be array{a: 1, b: 2}
-
-/** @var array<string, int> $s */
-$y = [...$s];
-// list<int>, should be array<string, int>
-```
-
-Since PHP 8.1 a spread keeps string keys (a later one overwrites an
-earlier one) and renumbers integer keys onto the end, so spreading known
-shapes gives a known shape and spreading a string-keyed array keeps its
-keys. PHPantom types every spread as a list of the value types, which is
-wrong rather than merely imprecise for string keys, and in the keyed
-examples above it also drops the entries the spread adds. `[...[], ...[]]`
-should be `array{}`.
-
-The SKIPs are in `tests/psalm_assertions/array_assignment.php`, under
-"array spread builds a list instead of the shape it spreads".
-Found porting Psalm's `ArrayAssignmentTest.php`.
-
-### B520. Writing a literal int key into an empty array builds a generic array
-
-**Impact: Medium · Complexity: Low (a decision, then a small change)**
+**Impact: Low-Medium · Complexity: Medium-High**
 
 ```php
-$f = [];
-$f[0] = 'hello';
-// non-empty-array<int, 'hello'>, should be array{'hello'}
-
-$a = [];
-$a[0]['a'] = 5;
-// non-empty-array<int, array{a: 5}>, should be array{array{a: 5}}
+/** @var list<User> $users */
+$config = ['admin' => new AdminUser(), ...$users];
+// array<int|string, AdminUser|User>, should be array{admin: AdminUser, ...<int, User>}
 ```
 
-A string key (`$f['k'] = …`) builds a shape, and so does an int key
-written into a shape that already has entries, but an int key written
-into `[]` does not. That is deliberate: the comment in
-`merge_nested_array_write_inner` (`type_engine/variable/array_shape_writes.rs`)
-says a run of `$data[0] = …; $data[1] = …;` onto `[]` is rarely a promise
-about how many entries there are. The array PHP builds is that exact
-shape, though, and PHPStan and Psalm both report it as one. Keeping the
-exception needs a reason stronger than intent (a performance or loop-growth
-case the tests pin); otherwise the empty shape should take the same path
-as a non-empty one.
+A spread whose source has no fixed set of keys (`list<T>`, `array<K, V>`)
+turns the whole literal into `array<K, V>`, so the entries written beside
+it are no longer known one by one: `$config['` offers no key completion,
+and `$config['admin']` reads `AdminUser|User`. PHPStan and Psalm describe
+this as an unsealed shape, the known entries plus a `...<K, V>` tail for
+the rest. PHPantom has no such type, so this needs one in `php_type/`
+(parsing, display, and the shape operations that would have to respect
+the tail) before the array literal builder in
+`type_engine/variable/raw_type_inference.rs` can produce it.
 
 The SKIPs are in `tests/psalm_assertions/array_assignment.php`, under
-"writing a literal int key into an empty array".
+"PHPantom has no unsealed shape type".
 Found porting Psalm's `ArrayAssignmentTest.php`.
 
-### B521. A key held in a variable with a literal value does not build a shape
+### B538. `Foo::class` is typed as `class-string<Foo>` rather than the name it evaluates to
 
-**Impact: Medium · Complexity: Medium**
-
-```php
-$string = 'c';
-$b = ['z' => 1];
-$b[$string] = 5;
-// non-empty-array<string, 1|5>, should be array{z: 1, c: 5}
-```
-
-`$b['c'] = 5` adds the entry; `$b[$string] = 5` with `$string` known to
-be `'c'` does not, because the write path only reads a key from a literal
-written at the write site (`extract_array_key_for_shape`). A key
-expression whose resolved type is a single literal should take the same
-path. `$leading_zero_map[$leading_zero_key]` in
-`collection_key_boundaries_normalize_literal_and_coercible_keys`
-(`type_engine/variable/resolution_tests.rs`) pins the current behaviour.
-
-The SKIPs are in `tests/psalm_assertions/array_assignment.php`, under
-"a key held in a variable with a literal value".
-Found porting Psalm's `ArrayAssignmentTest.php`.
-
-### B522. A key taken from iterating a literal list does not build a shape
-
-**Impact: Low · Complexity: Medium-High**
+**Impact: Low · Complexity: Medium**
 
 ```php
 $result = [];
-foreach (['a', 'b'] as $k) {
+foreach ([a::class, b::class] as $k) {
     $result[$k] = true;
 }
-// non-empty-array<string, true>, should be array{a: true, b: true}
+// non-empty-array<class-string<a>|class-string<b>, true>, should be array{a::class: true, b::class: true}
 ```
 
-The loop body runs once per element of a list whose values are all known,
-so every key is written. Short of that, the key type should at least stay
-the literal union `'a'|'b'` rather than widening to `string`.
+`a::class` is exactly the string `'…\a'`, but it is typed as
+`class-string<a>`, which also admits every subclass's name. A write
+through it cannot name the entry it lands on, so a loop over a list of
+class constants builds `array<K, V>` where a list of string literals
+builds a shape. Typing `Foo::class` as the literal name (while still
+treating it as a `class-string<Foo>` wherever one is expected) would let
+it take the same path, and shapes would need a way to carry a
+class-constant key they can compare, which they currently only store as
+its spelling.
 
-Found porting Psalm's `ArrayAssignmentTest.php` (`assignUnionOfLiterals`,
-`implicitIndexedIntArrayCreation`).
-
-### B523. Destructuring a nullable shape drops the null
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-/** @return array{'foo', 'bar'}|null */
-function foobar(): ?array { return null; }
-
-[$foo, $bar] = foobar();
-// $foo: 'foo', should be 'foo'|null
-```
-
-Destructuring `null` assigns `null` to every target, so each target's type
-should keep the null member.
-
-Found porting Psalm's `ArrayAssignmentTest.php` (`nullableDestructuring`).
-
-### B524. Destructuring an untyped call's result keeps each target's earlier value
-
-**Impact: Low-Medium · Complexity: Low**
-
-```php
-$a = 'a';
-function getMixed() {}
-list($a, list($b, $c)) = getMixed();
-// $a: 'a', should be mixed
-```
-
-A destructuring assignment writes every target whatever the right-hand
-side is. When it resolves to nothing, the targets keep what they held
-before instead of becoming `mixed`.
-
-Found porting Psalm's `ListTest.php` (`mixedNestedAssignment`).
+The SKIP is in `tests/psalm_assertions/array_assignment.php`, under
+"`a::class` is typed as `class-string<a>`".
+Found porting Psalm's `ArrayAssignmentTest.php` (`assignUnionOfLiteralsClassKeys`).
 
 ## Laravel
 

@@ -18,6 +18,14 @@ use crate::types::ResolvedType;
 
 /// Infer the raw PHPStan-style type for an array literal (`[…]` or
 /// `array(…)`) from its keys and value expressions.
+///
+/// The literal is built the way PHP builds it, one element at a time: a
+/// constant key sets that entry (a repeated key overwrites the earlier one
+/// in place), a value takes the next free integer key, and a spread copies
+/// its source's entries across, keeping string keys and renumbering integer
+/// keys onto the end. While every element's keys are known the result is a
+/// shape; the first one whose keys are not (a runtime key, a spread of an
+/// array of unknown length) turns it into `array<K, V>`/`list<T>`.
 pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     elements: impl Iterator<Item = &'b ArrayElement<'b>>,
     ctx: &VarResolutionCtx<'_>,
@@ -28,142 +36,242 @@ pub(in crate::type_engine) fn infer_array_literal_raw_type<'b>(
     // `list<T>` to avoid unbounded shape growth.
     const MAX_POSITIONAL_SHAPE_LEN: usize = 32;
 
-    // Maximum number of distinct alternatives to keep in the `list<T>`
-    // element union before falling back to the base scalar types. A
-    // literal array that names more distinct values than this is a data
-    // table rather than a set of alternatives worth reasoning about, and
-    // the union's pairwise absorption is quadratic in its member count.
-    const MAX_ELEMENT_ALTERNATIVES: usize = 32;
-
-    let mut types: Vec<PhpType> = Vec::new();
-    let mut key_types: Vec<PhpType> = Vec::new();
-    let mut has_string_keys = false;
-    let mut non_constant_key = false;
-    let mut saw_spread = false;
-    let mut saw_element = false;
-    let mut shape_entries: Vec<crate::php_type::ShapeEntry> = Vec::new();
-
+    let mut builder = LiteralBuilder::default();
     for elem in elements {
-        saw_element = true;
         match elem {
             ArrayElement::KeyValue(kv) => {
-                has_string_keys = true;
                 let value_type = infer_element_type(kv.value, ctx).unwrap_or_else(PhpType::mixed);
                 match extract_array_key_text(kv.key) {
                     Some(key_text) => {
-                        push_unique(&mut key_types, constant_key_type(kv.key));
-                        shape_entries.push(crate::php_type::ShapeEntry {
-                            key: Some(key_text),
-                            value_type: value_type.clone(),
-                            optional: false,
-                        });
+                        builder.set_key(key_text, constant_key_type(kv.key), value_type);
                     }
                     // A key that is not a literal has no name to record, and
                     // naming the entry after the key's *type* would invent a
                     // shape field nobody wrote. The whole literal falls back
                     // to `array<K, V>` instead.
                     None => {
-                        non_constant_key = true;
-                        push_unique(&mut key_types, dynamic_key_type(kv.key, ctx));
+                        builder.loosen();
+                        builder.is_list = false;
+                        push_unique(&mut builder.key_types, dynamic_key_type(kv.key, ctx));
+                        push_unique(&mut builder.types, value_type);
                     }
                 }
-                push_unique(&mut types, value_type);
             }
             ArrayElement::Value(v) => {
-                let resolved = infer_element_type(v.value, ctx);
                 // A positional shape must keep one entry per element to
                 // preserve arity, so an unresolvable element becomes
-                // `mixed`. The `list<T>` fallback keeps its original
-                // behaviour of ignoring unresolvable elements. Recorded
-                // in `shape_entries` (key: None) at the position it was
-                // written so PHP's sequential auto-index numbering,
-                // which `shape_keys` and `shape_value_type` both assume,
-                // stays intact even when later entries have string keys.
-                shape_entries.push(crate::php_type::ShapeEntry {
-                    key: None,
-                    value_type: resolved.clone().unwrap_or_else(PhpType::mixed),
-                    optional: false,
-                });
-                push_unique(&mut key_types, PhpType::int());
-                if let Some(t) = resolved
-                    && !types.contains(&t)
-                {
-                    types.push(t);
-                }
+                // `mixed`. The `list<T>` fallback ignores it instead.
+                let resolved = infer_element_type(v.value, ctx);
+                builder.append(resolved);
             }
             ArrayElement::Variadic(v) => {
-                // Spread: `...$other` — try to resolve iterable element type.
-                // A spread copies values the source already knows, so its
-                // element type carries over as written, the same as a value
-                // element beside it.
-                saw_spread = true;
                 let raw = super::foreach_resolution::resolve_expression_type(v.value, ctx);
-                push_unique(
-                    &mut key_types,
-                    raw.as_ref()
-                        .and_then(PhpType::iterable_key_type)
-                        .unwrap_or_else(array_key_type),
-                );
-                if let Some(raw) = raw
-                    && let Some(elem) = raw.iterable_element_type()
-                    && !types.contains(&elem)
-                {
-                    types.push(elem);
-                }
+                builder.spread(raw.as_ref());
             }
             ArrayElement::Missing(_) => {}
         }
     }
 
-    // `[]` is exactly the empty array, which a bare `array` (an array of
-    // unknown contents) does not say. Recording it as `array{}` lets a
-    // later write's result absorb it when branches rejoin, instead of
-    // leaving `array|array<int, Foo>` behind for every array built up
-    // conditionally from an empty start.
-    if !saw_element {
-        return Some(PhpType::array_shape(Vec::new()));
+    // A literal whose every entry is known is recorded as that shape, so
+    // that integer-literal indexing (`$pair[1]`) and list destructuring
+    // select the element at that position and out-of-bounds indices are
+    // known to be absent. `[]` is `array{}` for the same reason: a bare
+    // `array` would not say it is empty, and a later write's result could
+    // not absorb it when branches rejoin.
+    if let Some(exact) = builder.exact.take() {
+        let positional = exact.iter().all(|(_, entry)| entry.key.is_none());
+        if !positional || exact.len() <= MAX_POSITIONAL_SHAPE_LEN {
+            return Some(PhpType::array_shape(
+                exact.into_iter().map(|(_, entry)| entry).collect(),
+            ));
+        }
+    }
+    builder.loose_type()
+}
+
+/// The array an array literal builds, as far as its elements so far go.
+struct LiteralBuilder {
+    /// The literal's entries alongside the runtime key each lands on, while
+    /// every one of them is known. `None` once an element's keys are not.
+    exact: Option<Vec<(String, crate::php_type::ShapeEntry)>>,
+    /// The integer key the next positional element takes.
+    next_index: i64,
+    /// The key and value types every element contributes, for when the
+    /// literal is not a shape.
+    key_types: Vec<PhpType>,
+    types: Vec<PhpType>,
+    /// Whether a spread copied values whose type is not known.
+    unknown_values: bool,
+    /// Whether every key is one PHP numbered in order, making the literal a
+    /// list.
+    is_list: bool,
+}
+
+impl Default for LiteralBuilder {
+    fn default() -> Self {
+        LiteralBuilder {
+            exact: Some(Vec::new()),
+            next_index: 0,
+            key_types: Vec::new(),
+            types: Vec::new(),
+            unknown_values: false,
+            is_list: true,
+        }
+    }
+}
+
+impl LiteralBuilder {
+    /// Write `value_type` under the constant key `key_text`, whose type as a
+    /// key is `key_type`.
+    fn set_key(&mut self, key_text: String, key_type: PhpType, value_type: PhpType) {
+        self.is_list = false;
+        let index = crate::php_type::canonical_int_key(&key_text);
+        if let Some(index) = index {
+            self.next_index = self.next_index.max(index.saturating_add(1));
+        }
+        push_unique(&mut self.key_types, key_type);
+        push_unique(&mut self.types, value_type.clone());
+        let Some(exact) = self.exact.as_mut() else {
+            return;
+        };
+        let runtime_key = index.map_or(key_text.clone(), |index| index.to_string());
+        let entry = crate::php_type::ShapeEntry {
+            key: Some(key_text),
+            value_type,
+            optional: false,
+        };
+        match exact.iter_mut().find(|(key, _)| *key == runtime_key) {
+            // PHP keeps an overwritten key where it was.
+            Some((_, existing)) => existing.value_type = entry.value_type,
+            None => exact.push((runtime_key, entry)),
+        }
     }
 
-    // At least one key is only known at runtime, so the literal has no
-    // fixed set of fields: describe it by its key and value types instead.
-    if non_constant_key {
-        let key_type = join_key_types(key_types);
-        let value_type =
-            join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
-        return Some(PhpType::generic_array(key_type, value_type));
+    /// Write a value under the next free integer key.
+    fn append(&mut self, value_type: Option<PhpType>) {
+        push_unique(&mut self.key_types, PhpType::int());
+        if let Some(exact) = self.exact.as_mut() {
+            // Positional while it lands on the index a reader counting the
+            // positional entries before it would expect. Once an explicit
+            // integer key has moved the index along, it is spelled out.
+            let positional_count = exact
+                .iter()
+                .filter(|(_, entry)| entry.key.is_none())
+                .count();
+            let positional = usize::try_from(self.next_index) == Ok(positional_count);
+            exact.push((
+                self.next_index.to_string(),
+                crate::php_type::ShapeEntry {
+                    key: (!positional).then(|| self.next_index.to_string()),
+                    value_type: value_type.clone().unwrap_or_else(PhpType::mixed),
+                    optional: false,
+                },
+            ));
+        }
+        self.next_index = self.next_index.saturating_add(1);
+        if let Some(value_type) = value_type {
+            push_unique(&mut self.types, value_type);
+        }
     }
 
-    if has_string_keys && !shape_entries.is_empty() {
-        return Some(PhpType::array_shape(shape_entries));
+    /// Copy the entries of a spread `...$source` across, `source` being what
+    /// the spread resolved to.
+    fn spread(&mut self, source: Option<&PhpType>) {
+        if let Some(entries) = source.and_then(spread_entries) {
+            for (key, value_type) in entries {
+                match key {
+                    Some(key) => {
+                        let key_type = PhpType::string();
+                        self.set_key(key, key_type, value_type);
+                    }
+                    None => self.append(Some(value_type)),
+                }
+            }
+            return;
+        }
+        self.loosen();
+        let key_type = source.and_then(PhpType::iterable_key_type);
+        match key_type {
+            // Integer keys are renumbered onto the end.
+            Some(key) if key.is_int_subtype() => push_unique(&mut self.key_types, PhpType::int()),
+            Some(key) if key.is_string_subtype() => {
+                self.is_list = false;
+                push_unique(&mut self.key_types, key);
+            }
+            _ => {
+                self.is_list = false;
+                push_unique(&mut self.key_types, array_key_type());
+            }
+        }
+        // A spread copies values the source already knows, so its element
+        // type carries over as written, the same as a value element beside
+        // it.
+        match source.and_then(PhpType::iterable_element_type) {
+            Some(elem) => push_unique(&mut self.types, elem),
+            None => self.unknown_values = true,
+        }
     }
 
-    if types.is_empty() {
+    /// Stop tracking the literal as a shape.
+    fn loosen(&mut self) {
+        self.exact = None;
+    }
+
+    /// The literal as `array<K, V>`, or `list<T>` when its keys are.
+    fn loose_type(self) -> Option<PhpType> {
+        // Maximum number of distinct alternatives to keep in the element
+        // union before falling back to the base scalar types. A literal
+        // array that names more distinct values than this is a data table
+        // rather than a set of alternatives worth reasoning about, and the
+        // union's pairwise absorption is quadratic in its member count.
+        const MAX_ELEMENT_ALTERNATIVES: usize = 32;
+
+        if self.types.is_empty() {
+            return None;
+        }
+        // Preserved literals need absorbing against their siblings, so that a
+        // list written as `[$stringVar, 'yes', 'no']` is `list<string>` rather
+        // than `list<string|'yes'|'no'>`.
+        let value_type = if self.unknown_values {
+            PhpType::mixed()
+        } else {
+            join_alternatives(self.types, MAX_ELEMENT_ALTERNATIVES)?
+        };
+        if self.is_list {
+            Some(PhpType::list(value_type))
+        } else {
+            Some(PhpType::generic_array(
+                join_key_types(self.key_types),
+                value_type,
+            ))
+        }
+    }
+}
+
+/// The entries a spread of `source` copies, in order, when `source` is a
+/// shape whose every entry is known to be there: `Some(key)` for a string
+/// key, which the spread keeps, and `None` for an integer key, which it
+/// renumbers.
+fn spread_entries(source: &PhpType) -> Option<Vec<(Option<String>, PhpType)>> {
+    let crate::php_type::TypeKind::ArrayShape(entries) = source.kind() else {
         return None;
-    }
-
-    // A value-only literal with a fixed set of elements is recorded as a
-    // positional (tuple-style) array shape so that integer-literal indexing
-    // (`$pair[1]`) and list destructuring select the element at that
-    // position, and out-of-bounds indices are known to be absent. A spread
-    // element or an over-long literal makes the arity indeterminate, so
-    // those widen to `list<T>` instead.
-    if !saw_spread && !shape_entries.is_empty() && shape_entries.len() <= MAX_POSITIONAL_SHAPE_LEN {
-        return Some(PhpType::array_shape(shape_entries));
-    }
-
-    // Preserved literals need absorbing against their siblings, so that a
-    // list written as `[$stringVar, 'yes', 'no']` is `list<string>` rather
-    // than `list<string|'yes'|'no'>`. A list that names more distinct
-    // values than the cap is a data table, not a set of alternatives worth
-    // carrying, and the join's pairwise absorption is quadratic in the
-    // member count, so those widen to their base types first.
-    //
-    // Element sets with no literal in them keep the plain union: the join
-    // also rewrites `?T` into `T|null`, and that spelling change alone
-    // moves types that were never imprecise to begin with.
-    let elem_type =
-        join_alternatives(types, MAX_ELEMENT_ALTERNATIVES).unwrap_or_else(PhpType::mixed);
-    Some(PhpType::list(elem_type))
+    };
+    let keys = crate::php_type::runtime_shape_keys(entries)?;
+    entries
+        .iter()
+        .zip(keys)
+        .map(|(entry, key)| {
+            // A class-constant key is stored as its spelling, which says
+            // nothing about the key it evaluates to.
+            if entry.optional || key.contains("::") {
+                return None;
+            }
+            let key = crate::php_type::canonical_int_key(&key)
+                .is_none()
+                .then_some(key);
+            Some((key, entry.value_type.clone()))
+        })
+        .collect()
 }
 
 /// Collapse a set of alternatives into one type, or `None` when empty.

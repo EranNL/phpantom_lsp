@@ -220,13 +220,10 @@ fn merge_nested_array_write_inner(
                 return PhpType::array_shape(updated);
             }
             // A written-out index the shape does not have yet adds that
-            // slot, the same way a string key adds its entry. An empty
-            // shape is left to the generic pair: it has no arity to keep,
-            // and a run of `$data[0] = …; $data[1] = …;` onto `[]` is
-            // rarely a promise about how many entries there are.
+            // slot, the same way a string key adds its entry, and `[]` is
+            // no exception: the array PHP builds is exactly that shape.
             if let Some(slot) = slot
                 && let TypeKind::ArrayShape(entries) = base.kind()
-                && !entries.is_empty()
                 && let Some(runtime_keys) = runtime_shape_keys(entries)
             {
                 let slot_key = slot.to_string();
@@ -255,7 +252,8 @@ fn merge_nested_array_write_inner(
             }
             if keys.len() == 1
                 && let Some(entries) = base.shape_entries()
-                && let Some(updated) = write_literal_keys_into_shape(entries, key_type, &written)
+                && let Some(updated) =
+                    write_literal_keys_into_shape(entries, key_type, &written, in_loop)
             {
                 return updated;
             }
@@ -465,12 +463,29 @@ pub(super) fn extract_array_key_for_shape(index: &Expression<'_>) -> Option<Stri
 
 /// The literal integer an index expression spells out, if it is one.
 ///
-/// A write through such an index can update the matching slot of a
-/// tuple-style shape it already has (`$tuple[1] = …`). It deliberately
-/// does not *create* a numeric-keyed shape: `$data[0] = 'x'` on a plain
-/// array leaves the tracked `array<int, string>` pair alone, because a
-/// written-out index is usually one of many an unrolled or generated
-/// write sequence touches, not a promise about the array's arity.
+/// The key a write through an index resolved to `key_type` lands on, when
+/// that type is a single literal: `Ok` holds a string key a shape tracks by
+/// name, `Err` the integer index of a slot. A literal held in a variable
+/// (`$k = 'c'; $a[$k] = …`) names its entry as surely as one written at
+/// the write site.
+pub(super) fn literal_write_key(key_type: &PhpType) -> Option<Result<String, usize>> {
+    match key_type.as_literal()? {
+        LiteralValue::Int(raw) => raw.parse::<usize>().ok().map(Err),
+        literal @ LiteralValue::String(_) => {
+            let key = literal.string_content()?;
+            if is_decimal_int_array_key(&key) {
+                key.parse::<usize>().ok().map(Err)
+            } else {
+                Some(Ok(key.into_owned()))
+            }
+        }
+        LiteralValue::Float(_) => None,
+    }
+}
+
+/// A write through such an index updates or adds that slot of a shape
+/// (`$tuple[1] = …`). On an array tracked as a key/value pair instead,
+/// such as a declared `array<int, string>`, it folds into the pair.
 pub(super) fn extract_array_write_index(index: &Expression<'_>) -> Option<usize> {
     if let Expression::Literal(Literal::Integer(int_lit)) = index {
         return int_lit.value.and_then(|v| usize::try_from(v).ok());
@@ -526,18 +541,24 @@ fn merge_shape_key(base: &PhpType, key: &str, value_type: &PhpType) -> PhpType {
 }
 
 /// Write `value_type` through a key known to be one of a few literals into
-/// a shape that already holds every one of them, or `None` when that is not
-/// the case.
+/// a shape, or `None` when the key is not such a literal or the shape's keys
+/// are not known.
 ///
 /// The write lands on exactly one of the keys without saying which, so each
-/// entry it may have hit holds either its old value or the new one; a
-/// single literal is a write to that one entry.  Widening to `array<K, V>`
-/// instead would lose every key, which is what a `$seen[$k] = true` after
-/// an `isset($seen[$k])` check did.
+/// entry it may have hit holds either its old value or the new one; a single
+/// literal is a write to that one entry.  Widening to `array<K, V>` instead
+/// would lose every key, which is what a `$seen[$k] = true` after an
+/// `isset($seen[$k])` check did.
+///
+/// A key the shape does not have yet is added. A write that runs once gives
+/// one shape per key it may have written, each holding that entry for
+/// certain. One in a loop body may have run for any number of those keys,
+/// so each of them becomes an optional entry of a single shape.
 fn write_literal_keys_into_shape(
     entries: &[ShapeEntry],
     key_type: &PhpType,
     value_type: &PhpType,
+    in_loop: bool,
 ) -> Option<PhpType> {
     let written: Vec<String> = key_type
         .union_members()
@@ -553,12 +574,20 @@ fn write_literal_keys_into_shape(
         })
         .collect::<Option<_>>()?;
     let runtime_keys = runtime_shape_keys(entries)?;
-    if !written.iter().all(|key| runtime_keys.contains(key)) {
+    let single = written.len() == 1;
+    if single && !runtime_keys.contains(&written[0]) {
         return None;
     }
-    let single = written.len() == 1;
+    if !in_loop && !written.iter().all(|key| runtime_keys.contains(key)) {
+        return Some(PhpType::union(
+            written
+                .iter()
+                .map(|key| write_one_literal_key(entries, &runtime_keys, key, value_type))
+                .collect(),
+        ));
+    }
 
-    let updated: Vec<ShapeEntry> = entries
+    let mut updated: Vec<ShapeEntry> = entries
         .iter()
         .zip(&runtime_keys)
         .map(|(entry, key)| {
@@ -577,7 +606,44 @@ fn write_literal_keys_into_shape(
             entry
         })
         .collect();
+    for key in written {
+        if !runtime_keys.contains(&key) {
+            updated.push(ShapeEntry {
+                key: Some(key),
+                value_type: value_type.clone(),
+                optional: true,
+            });
+        }
+    }
     Some(PhpType::array_shape(updated))
+}
+
+/// The shape holding `entries` after `value_type` is written under `key`,
+/// which the entries' `runtime_keys` may or may not already include.
+fn write_one_literal_key(
+    entries: &[ShapeEntry],
+    runtime_keys: &[String],
+    key: &str,
+    value_type: &PhpType,
+) -> PhpType {
+    if let Some(index) = runtime_keys.iter().position(|existing| existing == key) {
+        let mut updated = entries.to_vec();
+        updated[index].value_type = value_type.clone();
+        updated[index].optional = false;
+        return PhpType::array_shape(updated);
+    }
+    if crate::php_type::canonical_int_key(key).is_some()
+        && crate::php_type::canonical_int_key(key) == next_append_index(entries)
+    {
+        return append_to_shape(&PhpType::array_shape(entries.to_vec()), entries, value_type);
+    }
+    let mut updated = entries.to_vec();
+    updated.push(ShapeEntry {
+        key: Some(key.to_string()),
+        value_type: value_type.clone(),
+        optional: false,
+    });
+    PhpType::array_shape(updated)
 }
 
 /// The position in `entries` of the entry whose explicit key is the

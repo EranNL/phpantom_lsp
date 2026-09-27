@@ -8,7 +8,7 @@ use std::collections::{HashMap, HashSet};
 use mago_span::HasSpan;
 
 use crate::atom::{atom, bytes_to_str, literal_bytes_to_str};
-use crate::php_type::{PhpType, TypeKind};
+use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::type_engine::types::narrowing;
 use crate::type_engine::variable::foreach_resolution::{
     is_unsubstituted_template_param, resolve_iterable_element_via_class,
@@ -711,6 +711,9 @@ pub(crate) fn process_foreach<'b>(
         if let Some((array_var, types)) = own_key_write_element {
             scope.set(&array_var, types);
         }
+        if body_always_runs && exits.breaks.is_empty() {
+            mark_visited_keys_written(foreach, &body_stmts, iter_type.as_ref(), scope);
+        }
         let _ = narrow_iterated_collection(
             foreach,
             &body_stmts,
@@ -719,6 +722,145 @@ pub(crate) fn process_foreach<'b>(
             scope,
             ctx,
         );
+    }
+}
+
+/// Make the entries a loop wrote at every key it visited required.
+///
+/// ```php
+/// $result = [];
+/// foreach (['a', 'b'] as $k) {
+///     $result[$k] = true;
+/// }
+/// // array{a: true, b: true}
+/// ```
+///
+/// Each write lands on one of the keys the loop variable can hold, which
+/// only makes each of them a possible entry (`array{a?: true, b?: true}`).
+/// A loop over a shape whose entries are all there, with a literal key or
+/// value per entry, visits every one of those literals, though. So when the
+/// body writes through the loop variable on every path, never skips ahead
+/// with `continue`, and never reassigns the variable, every entry the
+/// literals name was written by the time the loop ends. The caller has
+/// already checked that the body runs and that nothing broke out of it.
+fn mark_visited_keys_written(
+    foreach: &Foreach<'_>,
+    body_stmts: &[&Statement<'_>],
+    iter_type: Option<&PhpType>,
+    scope: &mut ScopeState,
+) {
+    let Some(TypeKind::ArrayShape(entries)) = iter_type.map(PhpType::kind) else {
+        return;
+    };
+    let Some(runtime_keys) = crate::php_type::runtime_shape_keys(entries) else {
+        return;
+    };
+    let keys_visited: Option<Vec<String>> = entries
+        .iter()
+        .zip(runtime_keys)
+        .map(|(entry, key)| (!entry.optional && !key.contains("::")).then_some(key))
+        .collect();
+    let values_visited: Option<Vec<String>> = entries
+        .iter()
+        .map(|entry| {
+            if entry.optional {
+                return None;
+            }
+            let literal = entry.value_type.as_literal()?;
+            match literal {
+                LiteralValue::Int(raw) => Some(raw.to_string()),
+                LiteralValue::String(_) => {
+                    literal.string_content().map(std::borrow::Cow::into_owned)
+                }
+                LiteralValue::Float(_) => None,
+            }
+        })
+        .collect();
+    let candidates: Vec<(&Expression<'_>, Option<Vec<String>>)> = match &foreach.target {
+        ForeachTarget::KeyValue(kv) => vec![(kv.key, keys_visited), (kv.value, values_visited)],
+        ForeachTarget::Value(val) => vec![(val.value, values_visited)],
+    };
+    if body_stmts.iter().any(|stmt| statement_may_continue(stmt)) {
+        return;
+    }
+    let mut assigned = HashMap::new();
+    for stmt in body_stmts {
+        collect_assignment_deps(stmt, &mut assigned);
+    }
+    for (loop_var, visited) in candidates {
+        let (Expression::Variable(Variable::Direct(dv)), Some(visited)) = (loop_var, visited)
+        else {
+            continue;
+        };
+        let loop_var = bytes_to_str(dv.name);
+        if !assigned.contains_key(loop_var) {
+            mark_keys_written(body_stmts, loop_var, &visited, scope);
+        }
+    }
+}
+
+/// Make the entries under `visited` required in every array the body
+/// writes through `loop_var` on every path.
+fn mark_keys_written(
+    body_stmts: &[&Statement<'_>],
+    loop_var: &str,
+    visited: &[String],
+    scope: &mut ScopeState,
+) {
+    for array_var in always_written_array_vars(body_stmts, loop_var) {
+        let Some(current) = scope.get(&array_var).last().map(|rt| &rt.type_string) else {
+            continue;
+        };
+        let Some(written) = current.shape_entries() else {
+            continue;
+        };
+        let Some(written_keys) = crate::php_type::runtime_shape_keys(written) else {
+            continue;
+        };
+        if !visited.iter().all(|key| written_keys.contains(key)) {
+            continue;
+        }
+        let promoted: Vec<crate::php_type::ShapeEntry> = written
+            .iter()
+            .zip(&written_keys)
+            .map(|(entry, key)| crate::php_type::ShapeEntry {
+                optional: entry.optional && !visited.contains(key),
+                ..entry.clone()
+            })
+            .collect();
+        scope.set(
+            &array_var,
+            vec![ResolvedType::from_type_string(PhpType::array_shape(
+                promoted,
+            ))],
+        );
+    }
+}
+
+/// Whether a statement in a loop body may skip ahead to the next iteration,
+/// or a `continue` inside a nested structure may do so on its behalf.
+fn statement_may_continue(stmt: &Statement<'_>) -> bool {
+    match stmt {
+        Statement::Continue(_) => true,
+        Statement::Block(block) => block.statements.iter().any(statement_may_continue),
+        Statement::If(if_stmt) => match &if_stmt.body {
+            IfBody::Statement(body) => {
+                statement_may_continue(body.statement)
+                    || body
+                        .else_if_clauses
+                        .iter()
+                        .any(|clause| statement_may_continue(clause.statement))
+                    || body
+                        .else_clause
+                        .as_ref()
+                        .is_some_and(|clause| statement_may_continue(clause.statement))
+            }
+            IfBody::ColonDelimited(_) => true,
+        },
+        Statement::Expression(_) | Statement::Echo(_) | Statement::Return(_) => false,
+        // Anything else (a nested loop, `switch`, `try`) is taken to possibly
+        // hold one, rather than walking every shape it comes in.
+        _ => true,
     }
 }
 

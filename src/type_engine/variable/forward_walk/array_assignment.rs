@@ -53,25 +53,19 @@ pub(crate) fn process_destructuring_assignment<'b>(
         .unwrap_or(rt)
     });
 
-    if let Some(ref rhs_type) = raw_type {
-        bind_destructured_pattern(assignment.lhs, rhs_type, scope, ctx);
+    match raw_type {
+        Some(ref rhs_type) => bind_destructured_pattern(assignment.lhs, rhs_type, scope, ctx),
+        None => forget_destructured_vars(assignment.lhs, scope),
     }
-
-    // Ensure every destructured variable is present in scope even when the
-    // RHS type (or an individual element's type) could not be resolved.  A
-    // plain assignment from an unresolvable RHS records the variable with an
-    // empty type list via `set_empty`, which lets later assert narrowing seed
-    // a type for it.  Without this, list-destructuring from an unresolvable
-    // RHS leaves the variables absent from scope entirely, so the assert
-    // narrowing loop never visits them and the asserted type is dropped.
-    seed_destructured_vars_empty(assignment.lhs, scope);
 }
 
-/// Walk a destructuring LHS pattern and record every direct variable in
-/// scope with an empty type list, unless it is already present.  Used so
-/// that variables destructured from an unresolvable RHS still participate
-/// in later narrowing (`set_empty` leaves any already-bound type intact).
-pub(crate) fn seed_destructured_vars_empty<'b>(lhs: &'b Expression<'b>, scope: &mut ScopeState) {
+/// Record every direct variable in a destructuring LHS pattern as holding
+/// an unknown value.  A destructuring writes each of its targets whatever
+/// the RHS turns out to be, so one whose element could not be typed loses
+/// the value it held before, the way a plain assignment from an
+/// unresolvable RHS does.  The entry stays in scope, which lets later
+/// assert narrowing seed a type for it.
+fn forget_destructured_vars<'b>(lhs: &'b Expression<'b>, scope: &mut ScopeState) {
     let elements: Vec<&ArrayElement<'b>> = match lhs {
         Expression::Array(arr) => arr.elements.iter().collect(),
         Expression::List(list) => list.elements.iter().collect(),
@@ -86,10 +80,10 @@ pub(crate) fn seed_destructured_vars_empty<'b>(lhs: &'b Expression<'b>, scope: &
         };
         match value_expr {
             Expression::Variable(Variable::Direct(dv)) => {
-                scope.set_empty(bytes_to_str(dv.name));
+                scope.set_unknown(bytes_to_str(dv.name));
             }
             Expression::Array(_) | Expression::List(_) => {
-                seed_destructured_vars_empty(value_expr, scope);
+                forget_destructured_vars(value_expr, scope);
             }
             _ => {}
         }
@@ -134,27 +128,53 @@ pub(crate) fn bind_destructured_pattern<'b>(
             _ => continue,
         };
 
-        // Determine the type for this element position.
-        let elem_type: Option<PhpType> = shape_key
-            .as_ref()
-            .and_then(|k| rhs_type.shape_value_type(k).cloned())
-            .or_else(|| rhs_type.extract_value_type(false).cloned());
+        let elem_type = destructured_element_type(rhs_type, shape_key.as_deref());
 
-        match value_expr {
-            // Direct variable: bind the type.
-            Expression::Variable(Variable::Direct(dv)) => {
-                if let Some(ref vt) = elem_type {
-                    scope.set(bytes_to_str(dv.name), ctx.resolved_types_for(vt.clone()));
-                }
+        match (value_expr, elem_type) {
+            (Expression::Variable(Variable::Direct(dv)), Some(vt)) => {
+                scope.set(bytes_to_str(dv.name), ctx.resolved_types_for(vt));
             }
-            // Nested pattern: recurse with the extracted element type.
-            Expression::Array(_) | Expression::List(_) => {
-                if let Some(ref vt) = elem_type {
-                    bind_destructured_pattern(value_expr, vt, scope, ctx);
-                }
+            (Expression::Array(_) | Expression::List(_), Some(vt)) => {
+                bind_destructured_pattern(value_expr, &vt, scope, ctx);
+            }
+            (Expression::Variable(Variable::Direct(dv)), None) => {
+                scope.set_unknown(bytes_to_str(dv.name));
+            }
+            (Expression::Array(_) | Expression::List(_), None) => {
+                forget_destructured_vars(value_expr, scope);
             }
             _ => {}
         }
+    }
+}
+
+/// The type the element under `key` of a destructured `rhs_type` holds.
+///
+/// A union is one of its members at runtime, so each target holds what it
+/// would have read off any of them. Destructuring `null` or another scalar
+/// assigns `null` to every target, so a nullable RHS hands each target its
+/// element type or `null`.
+fn destructured_element_type(rhs_type: &PhpType, key: Option<&str>) -> Option<PhpType> {
+    match rhs_type.kind() {
+        TypeKind::Nullable(inner) => destructured_element_type(inner, key).map(PhpType::or_null),
+        TypeKind::Union(members) => members
+            .iter()
+            .map(|member| destructured_element_type(member, key))
+            .collect::<Option<Vec<_>>>()
+            .map(PhpType::union),
+        _ if rhs_type.is_null()
+            || rhs_type.is_bool()
+            || rhs_type.is_true()
+            || rhs_type.is_false()
+            || rhs_type.is_int_subtype()
+            || rhs_type.is_float_subtype()
+            || rhs_type.is_string_subtype() =>
+        {
+            Some(PhpType::null())
+        }
+        _ => key
+            .and_then(|k| rhs_type.shape_value_type(k).cloned())
+            .or_else(|| rhs_type.extract_value_type(false).cloned()),
     }
 }
 
@@ -533,12 +553,20 @@ fn apply_array_write<'b>(
                 Some(key) => super::super::array_shape_writes::ArrayWriteKey::Shape(key),
                 None => {
                     let index_types = resolve_rhs_with_scope(idx, scope, ctx);
+                    let key_type =
+                        super::super::array_shape_writes::infer_array_key_type(idx, &index_types);
+                    let literal_slot =
+                        match super::super::array_shape_writes::literal_write_key(&key_type) {
+                            Some(Ok(key)) => {
+                                return super::super::array_shape_writes::ArrayWriteKey::Shape(key);
+                            }
+                            Some(Err(slot)) => Some(slot),
+                            None => None,
+                        };
                     super::super::array_shape_writes::ArrayWriteKey::Keyed {
-                        key_type: super::super::array_shape_writes::infer_array_key_type(
-                            idx,
-                            &index_types,
-                        ),
-                        slot: super::super::array_shape_writes::extract_array_write_index(idx),
+                        key_type,
+                        slot: super::super::array_shape_writes::extract_array_write_index(idx)
+                            .or(literal_slot),
                         existing: is_existing_key_write(
                             subjects.get(depth).and_then(Option::as_deref),
                             idx,
