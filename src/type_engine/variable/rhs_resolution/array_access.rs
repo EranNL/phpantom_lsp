@@ -12,7 +12,7 @@ use crate::docblock;
 use crate::php_type::{LiteralValue, PhpType, TypeKind};
 use crate::types::ResolvedType;
 
-use crate::type_engine::resolver::VarResolutionCtx;
+use crate::type_engine::resolver::{ResolutionCtx, VarResolutionCtx};
 
 use super::{resolve_rhs_expression, resolve_var_types};
 
@@ -132,7 +132,7 @@ pub(super) fn resolve_rhs_array_access<'b>(
                 None
             };
         let seg = literal_seg.as_ref().unwrap_or(seg);
-        let Some(element) = index_segment(&current, seg, ctx) else {
+        let Some(element) = index_segment(&current, seg, &ctx.as_resolution_ctx()) else {
             return vec![];
         };
         current = element;
@@ -233,7 +233,7 @@ fn literal_variable_index(
 fn index_segment(
     base: &PhpType,
     seg: &ArrayBracketSegment,
-    ctx: &VarResolutionCtx<'_>,
+    ctx: &ResolutionCtx<'_>,
 ) -> Option<PhpType> {
     match base.kind() {
         TypeKind::Union(members) => {
@@ -308,7 +308,7 @@ fn index_segment(
     // `OpeningHours extends DataCollection<string, Day>`.
     let class_element = crate::type_engine::type_resolution::type_hint_to_classes_typed(
         base,
-        &ctx.current_class.name,
+        ctx.current_class.map_or("", |cls| &cls.name),
         ctx.all_classes,
         ctx.class_loader,
     )
@@ -350,6 +350,21 @@ fn index_segment(
         return Some(PhpType::null());
     }
     None
+}
+
+/// The value type an offset read of `base` yields, the same answer
+/// `$base[…]` resolves to: `key` is the literal key read, or `None` for a
+/// key that is not written as one.
+pub(crate) fn offset_read_type(
+    base: &PhpType,
+    key: Option<&str>,
+    ctx: &ResolutionCtx<'_>,
+) -> Option<PhpType> {
+    let seg = match key {
+        Some(key) => ArrayBracketSegment::StringKey(key.to_string()),
+        None => ArrayBracketSegment::ElementAccess,
+    };
+    index_segment(base, &seg, ctx)
 }
 
 /// Classification of an array access index expression.

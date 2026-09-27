@@ -267,10 +267,18 @@ fn merge_nested_array_write_inner(
             // element type instead of joining it. Joining would keep the
             // element as it was before the write, so a key added below a
             // dynamic key could never be read back as present.
+            //
+            // A shape is the exception: it spells out its entries, and the
+            // ones the key does not land on keep what they held, so
+            // `$a[$k][] = $x` on `array{a: array{}, b: array{}}` leaves each
+            // entry `array{}` or `array{X}`.
             let inner_base = keyed_slot_base(base);
             let inner_merged =
                 merge_nested_array_write(&inner_base, &keys[1..], value_type, in_loop);
-            merge_keyed_type_inner(base, key_type, &inner_merged, false)
+            let keeps_other_entries = base
+                .shape_entries()
+                .is_some_and(|entries| !entries.is_empty());
+            merge_keyed_type_inner(base, key_type, &inner_merged, keeps_other_entries)
         }
         ArrayWriteKey::Append => {
             debug_assert_eq!(keys.len(), 1, "`[]` is only valid as the last segment");

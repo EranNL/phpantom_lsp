@@ -169,6 +169,34 @@ fn integer_key_writes_add_the_slot_to_the_shape_they_reach() {
     );
 }
 
+/// A write below a dynamic key lands on one entry of a shape, and the
+/// entries it does not land on keep what they held.
+#[test]
+fn a_nested_write_through_a_dynamic_key_keeps_the_shape_entries_it_misses() {
+    let write = |base: &str, value: &str| {
+        let keys = vec![
+            ArrayWriteKey::Keyed {
+                key_type: PhpType::string(),
+                slot: None,
+                existing: false,
+            },
+            ArrayWriteKey::Append,
+        ];
+        merge_nested_array_write(&PhpType::parse(base), &keys, &PhpType::parse(value), false)
+            .to_string()
+    };
+
+    assert_eq!(
+        write("array{a: array{}, b: array{}}", "Foo"),
+        "non-empty-array<string, array{}|array{Foo}>"
+    );
+    // An empty shape has no entries for the write to miss.
+    assert_eq!(
+        write("array{}", "Foo"),
+        "non-empty-array<string, array{Foo}>"
+    );
+}
+
 /// A union of shapes is one of them at runtime, so a write lands in each
 /// alternative rather than folding them all into one generic pair.
 #[test]

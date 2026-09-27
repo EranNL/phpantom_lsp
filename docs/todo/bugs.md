@@ -112,33 +112,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B537. A spread of an array filled through a dynamic key makes the call `never`
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-$floats = ['a' => [], 'b' => []];
-foreach (['a' => $x, 'b' => $y] as $key => $types) {
-    foreach ($types as $type) {
-        $floats[$key][] = $type;
-    }
-}
-if (count($floats['a']) === 0) { … } elseif (count($floats['b']) === 0) { … }
-$aTypes = TypeCombinator::union(...$floats['a']);
-$aTypes->equals($b);
-// Cannot access method 'equals' on type 'never'
-```
-
-Two things seem to go wrong here (not yet confirmed in isolation).
-`$floats[$key][] = …` with a non-literal key probably leaves
-`$floats['a']` as `array{}`. And spreading an empty array passes no
-arguments, which is a perfectly reachable call. It should not count as an
-argument that can never be reached, so it should not make the call `never`.
-
-Found in phpstan-src's `MutatingScope.php` (the only diagnostic
-`analyze` reports on it). It is already there at HEAD, before the
-template fixes.
-
 ### B530. A constant whose initializer uses another constant has no type
 
 **Impact: Medium · Complexity: Medium**

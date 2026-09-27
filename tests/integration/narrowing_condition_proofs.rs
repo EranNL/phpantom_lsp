@@ -2498,6 +2498,71 @@ function probe(array $xs): void {
     );
 }
 
+/// A `count()` check on an entry of a union reads the entry off every
+/// member of the union. Taking it from the shape member alone left
+/// `$z['a']` as `array{}`, so ruling the empty array out left `never`.
+#[test]
+fn a_count_guard_on_an_entry_of_a_union_reads_every_member() {
+    let backend = create_test_backend();
+    let uri = "file:///count_union_entry.php";
+    let content = r#"<?php
+/** @param array{a: array{}}|non-empty-array<string, non-empty-list<string>> $z */
+function probe(array $z): void {
+    if (count($z['a']) === 0) {
+        return;
+    }
+    $first = $z['a'];
+    echo $first; // <-- here
+}
+"#;
+    let hover = hover_marked(&backend, uri, content);
+    assert!(
+        hover.contains("$first = non-empty-list<string>"),
+        "got: {hover}"
+    );
+}
+
+/// Spreading an array a loop filled through a dynamic key, once `count()`
+/// checks have ruled its empty entries out, passes the values the loop put
+/// there, so the call returns what it declares. Iterating the grouped
+/// arrays hands the checks one union to read the entries from.
+#[test]
+fn a_spread_of_an_array_filled_through_a_dynamic_key_is_not_never() {
+    let backend = create_test_backend();
+    let uri = "file:///count_spread_dynamic_key.php";
+    let content = r#"<?php
+class Type {
+    public function equals(Type $other): bool { return true; }
+    public static function union(Type ...$types): Type { return $types[0]; }
+}
+class ConstantType extends Type {}
+/** @return Type[] */
+function flatten(Type $t): array { return [$t]; }
+function probe(Type $a, Type $b): void {
+    $constants = ['a' => [], 'b' => []];
+    $others = ['a' => [], 'b' => []];
+    foreach (['a' => flatten($a), 'b' => flatten($b)] as $key => $types) {
+        foreach ($types as $type) {
+            if ($type instanceof ConstantType) {
+                $constants[$key][] = $type;
+            }
+        }
+    }
+    foreach ([$constants, $others] as $grouped) {
+        if (count($grouped['a']) === 0) {
+            continue;
+        } elseif (count($grouped['b']) === 0) {
+            continue;
+        }
+        $aTypes = Type::union(...$grouped['a']);
+        $aTypes->equals(Type::union(...$grouped['b']));
+    }
+}
+"#;
+    let errors = slow_diagnostic_messages(&backend, uri, content, "scalar_member_access");
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
 /// A bound `count()` cannot fall below says nothing: `count($xs) < 5` is
 /// true of the empty array too.
 #[test]

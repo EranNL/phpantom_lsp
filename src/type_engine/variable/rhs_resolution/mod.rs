@@ -70,7 +70,7 @@ pub(crate) use arithmetic::{
     infer_modulo_result_type,
 };
 
-pub(crate) use array_access::{class_string_inner_binding, insert_or_union};
+pub(crate) use array_access::{class_string_inner_binding, insert_or_union, offset_read_type};
 pub(crate) use calls::{
     ArgWalkerTypes, build_function_template_subs, infer_closure_literal_type,
     is_array_like_wrapper, resolve_arg_call_raw_type, resolve_arg_iterable_raw_type,
