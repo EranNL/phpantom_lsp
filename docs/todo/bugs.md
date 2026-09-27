@@ -165,23 +165,6 @@ declared `@param-out int`, so the wrong literal comes out looking precise.
 
 Found porting Psalm's `ReferenceConstraintTest.php`.
 
-### B532. Unpacking an array into a by-reference variadic parameter replaces the array
-
-**Impact: Low · Complexity: Low**
-
-```php
-function example(int &...$x): void {}
-$z = [0];
-example(...$z);
-// int, should be array<int, int>
-```
-
-The write-back treats the spread argument as if it were the parameter
-itself. Each element of the unpacked array is what the callee writes to,
-so the array keeps its keys and its values take the parameter's type.
-
-Found porting Psalm's `ArgTest.php` (`unpackByRefArg`).
-
 ### B533. A reference assigned inside `??`'s left operand takes the fallback's type
 
 **Impact: Low · Complexity: Low**

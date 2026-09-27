@@ -985,6 +985,14 @@ fn resolved_method_callee(
     ))
 }
 
+/// Whether `value_expr` is passed to the call via `...value_expr` (argument
+/// unpacking), rather than as a direct positional or named argument.
+fn arg_is_unpacked<'b>(arg_list: &ArgumentList<'b>, value_expr: &Expression<'b>) -> bool {
+    arg_list.arguments.iter().any(|arg| {
+        matches!(arg, Argument::Positional(pos) if pos.ellipsis.is_some() && std::ptr::eq(pos.value, value_expr))
+    })
+}
+
 /// For each variable argument in a call expression that is passed to a
 /// pass-by-reference parameter with a primitive type hint (e.g.
 /// `array &$matches`), seed or refresh the variable in scope. Existing exact
@@ -1097,6 +1105,12 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
             continue;
         }
 
+        // `example(...$z)` unpacks each element of `$z` into a separate
+        // by-ref argument; the callee writes through the *elements*, not
+        // through `$z` itself, so `$z` stays an array whose values take
+        // the parameter's type rather than becoming that type directly.
+        let is_spread = param.is_variadic && arg_is_unpacked(arg_list, arg_expr);
+
         let already_in_scope = !scope.get(&var_name).is_empty();
         let mut seeded = false;
         if let Some(out_hint) = effective_out_type(param, param_index, &template_owner, ctx.backend)
@@ -1149,7 +1163,34 @@ pub(crate) fn seed_pass_by_ref_primitives<'b>(
                 }
                 _ => effective_hint.is_scalar(),
             };
-            if primitive_hint {
+            if primitive_hint && is_spread {
+                // The existing array's own element type plays the same role
+                // here that the whole variable's type plays below: kept
+                // when it already agrees with the hint (minus literal
+                // precision), replaced by the hint when it disagrees or is
+                // unknown. The array's keys are untouched either way.
+                let existing = scope.get(&var_name);
+                let existing_joined =
+                    (!existing.is_empty()).then(|| ResolvedType::types_joined(existing));
+                let key_type = existing_joined
+                    .as_ref()
+                    .and_then(PhpType::iterable_key_type)
+                    .unwrap_or_else(PhpType::int);
+                let value_type = existing_joined
+                    .as_ref()
+                    .and_then(PhpType::iterable_element_type)
+                    .filter(|value| !value.is_null())
+                    .filter(|value| value.is_subtype_of(&effective_hint))
+                    .map(|value| value.widen_scalar_literals())
+                    .unwrap_or(effective_hint);
+                scope.set(
+                    &var_name,
+                    vec![ResolvedType::from_type_string(PhpType::generic_array(
+                        key_type, value_type,
+                    ))],
+                );
+                seeded = true;
+            } else if primitive_hint {
                 // The callee may assign any value the parameter type allows,
                 // so an exact value observed before the call is stale. What
                 // the call cannot invalidate is precision the hint does not

@@ -20,7 +20,7 @@ namespace PsalmTest_arg_2 {
     example(...$z);
 
     assertType('int', $y);
-    assertType('array<int, int>', $z); // SKIP: unpacking an array into a by-reference variadic parameter replaces the array with the parameter's type
+    assertType('array<int, int>', $z);
 }
 
 // Test: sortFunctions
