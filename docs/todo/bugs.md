@@ -208,19 +208,3 @@ A nameless `@var` above an assignment types its right-hand side. It is
 honoured when the target is a variable, not when it is an array element.
 
 Found porting Psalm's `TypeReconciliation/EmptyTest.php` (`issue-9341-1`).
-
-### B535. First-class callables built from a dynamic name or an invokable object have no return type
-
-**Impact: Low-Medium · Complexity: Low-Medium**
-
-```php
-$name = 'length';
-$f = $test->$name(...);    // calling $f gives mixed, should be int
-$g = Test::$name(...);     // same
-$h = $test(...);           // same, for an object with __invoke(): int
-```
-
-`$test->length(...)` resolves; a method name held in a variable with a
-literal value, and an invokable object, do not.
-
-Found porting Psalm's `ClosureTest.php`.

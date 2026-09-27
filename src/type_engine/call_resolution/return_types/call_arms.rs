@@ -718,6 +718,7 @@ impl Backend {
     pub(super) fn return_types_of_variable_invocation(
         var_name: &str,
         ctx: &ResolutionCtx<'_>,
+        mut return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         let content = ctx.content;
         let cursor_offset = ctx.cursor_offset;
@@ -754,37 +755,39 @@ impl Backend {
             crate::type_engine::resolver::resolve_target_classes(var_name, AccessKind::Arrow, ctx);
         for rt in &resolved_var_types {
             if let Some(ret_type) = rt.type_string.callable_return_type() {
-                let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                        ret_type,
-                        "",
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                if !classes.is_empty() {
-                    return classes;
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ret_type.clone());
                 }
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                    ret_type,
+                    "",
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
             }
         }
 
         // 3. Check for __invoke().  When $f holds an object with
         //    an __invoke() method, $f() should return
-        //    __invoke()'s return type.
+        //    __invoke()'s return type.  Set the raw hint even when
+        //    the return type is scalar (e.g. `__invoke(): int`), so
+        //    a caller reading `return_type_hint_out` still sees it —
+        //    `type_hint_to_classes_typed_returned` only has classes
+        //    to hand back.
         let var_classes = ResolvedType::into_arced_classes(resolved_var_types);
         for owner in &var_classes {
             if let Some(invoke) = owner.get_method("__invoke")
                 && let Some(ref ret) = invoke.return_type
             {
-                let classes: Vec<Arc<ClassInfo>> =
-                    crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
-                        ret,
-                        "",
-                        ctx.all_classes,
-                        ctx.class_loader,
-                    );
-                if !classes.is_empty() {
-                    return classes;
+                if let Some(ref mut hint_out) = return_type_hint_out {
+                    **hint_out = Some(ret.clone());
                 }
+                return crate::type_engine::type_resolution::type_hint_to_classes_typed_returned(
+                    ret,
+                    "",
+                    ctx.all_classes,
+                    ctx.class_loader,
+                );
             }
         }
 

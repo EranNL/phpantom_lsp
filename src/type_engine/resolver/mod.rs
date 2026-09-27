@@ -1609,6 +1609,38 @@ fn resolve_class_string_inner_classes(
     results
 }
 
+/// A member name written as `$variable` — a dynamic method/property
+/// access such as `$obj->$name()`, `Class::$name()`, or their first-class
+/// callable forms — resolves through whatever literal string that
+/// variable holds at the call site: `$name = 'length'; $obj->$name()`
+/// calls `length()` exactly as `$obj->length()` would.
+///
+/// Returns `member` unchanged when it is not a bare `$variable`
+/// reference, or when the variable's resolved type carries no known
+/// literal string value (the caller then keeps its normal, currently
+/// unresolvable, behaviour for a truly dynamic name).
+pub(crate) fn resolve_dynamic_member_name<'a>(
+    member: &'a str,
+    ctx: &ResolutionCtx<'_>,
+) -> std::borrow::Cow<'a, str> {
+    if !member.starts_with('$') || !is_bare_variable(member) {
+        return std::borrow::Cow::Borrowed(member);
+    }
+    resolve_variable_fallback(member, AccessKind::Arrow, ctx)
+        .into_iter()
+        .find_map(|rt| match rt.type_string.kind() {
+            TypeKind::Literal(literal) => match &**literal {
+                crate::php_type::LiteralValue::String(raw) => {
+                    crate::util::unescape_php_string_literal(raw)
+                }
+                _ => None,
+            },
+            _ => None,
+        })
+        .map(std::borrow::Cow::Owned)
+        .unwrap_or(std::borrow::Cow::Borrowed(member))
+}
+
 /// Resolve a bare `$var` subject to its classes.
 ///
 /// Resolves a variable to its classes by running the full variable

@@ -287,7 +287,7 @@ namespace PsalmTest_closure_14 {
     $closure = $test->$method_name(...);
     $length = $closure();
 
-    assertType('int', $length); // SKIP: a first-class callable from a dynamic method name has no return type
+    assertType('int', $length);
 }
 
 // Test: FirstClassCallable:InstanceMethod:BuiltIn
@@ -327,7 +327,7 @@ namespace PsalmTest_closure_17 {
     $closure = Test::$method_name(...);
     $length = $closure("test");
 
-    assertType('int', $length); // SKIP: a first-class callable from a dynamic method name has no return type
+    assertType('int', $length);
 }
 
 // Test: FirstClassCallable:InvokableObject
@@ -342,7 +342,7 @@ namespace PsalmTest_closure_18 {
     $closure = $test(...);
     $length = $closure("test");
 
-    assertType('int', $length); // SKIP: a first-class callable from an invokable object has no return type
+    assertType('int', $length);
 }
 
 // Test: FirstClassCallable:MagicInstanceMethod

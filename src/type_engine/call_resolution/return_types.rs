@@ -326,18 +326,22 @@ impl Backend {
         return_type_hint_out: Option<&mut Option<PhpType>>,
     ) -> Vec<Arc<ClassInfo>> {
         match callee {
-            SubjectExpr::MethodCall { base, method } => Self::return_types_of_method_call(
-                base,
-                method,
-                text_args,
-                receiver,
-                ctx,
-                return_type_hint_out,
-            ),
+            SubjectExpr::MethodCall { base, method } => {
+                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
+                Self::return_types_of_method_call(
+                    base,
+                    &method,
+                    text_args,
+                    receiver,
+                    ctx,
+                    return_type_hint_out,
+                )
+            }
             SubjectExpr::StaticMethodCall { class, method } => {
+                let method = crate::type_engine::resolver::resolve_dynamic_member_name(method, ctx);
                 Self::return_types_of_static_method_call(
                     class,
-                    method,
+                    &method,
                     text_args,
                     ctx,
                     return_type_hint_out,
@@ -347,7 +351,7 @@ impl Backend {
                 Self::return_types_of_function_call(func_name, text_args, ctx, return_type_hint_out)
             }
             SubjectExpr::Variable(var_name) => {
-                Self::return_types_of_variable_invocation(var_name, ctx)
+                Self::return_types_of_variable_invocation(var_name, ctx, return_type_hint_out)
             }
             SubjectExpr::NewExpr { class_name } => Self::return_types_of_constructor_call(
                 class_name,
