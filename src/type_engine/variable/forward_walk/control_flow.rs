@@ -4,6 +4,7 @@ use mago_span::HasSpan;
 
 use crate::atom::bytes_to_str;
 use crate::parser::extract_hint_type;
+use crate::php_type::{PhpType, TypeKind};
 use crate::types::ResolvedType;
 
 /// Bind the exception variable a `catch` clause names into `scope`.
@@ -33,6 +34,24 @@ fn bind_catch_variable(
         ResolvedType::from_classes_with_hint(resolved, parsed_hint)
     };
     scope.set(bytes_to_str(var.name), exception_types);
+}
+
+/// Whether one of the statement's catch clauses takes `\Throwable`, so no
+/// exception from the try body leaves it uncaught.
+fn catches_everything(try_stmt: &Try<'_>) -> bool {
+    try_stmt.catch_clauses.iter().any(|catch| {
+        let hint = extract_hint_type(&catch.hint);
+        let names_throwable = |ty: &PhpType| {
+            ty.base_name().is_some_and(|name| {
+                name.trim_start_matches('\\')
+                    .eq_ignore_ascii_case("Throwable")
+            })
+        };
+        match hint.kind() {
+            TypeKind::Union(members) => members.iter().any(names_throwable),
+            _ => names_throwable(&hint),
+        }
+    })
 }
 
 /// Walk a `try` body into `scope` and return the scope a `catch` clause
@@ -88,8 +107,23 @@ pub(crate) fn process_try<'b>(
         if ctx.cursor_offset >= finally_span.start.offset
             && ctx.cursor_offset <= finally_span.end.offset
         {
-            // In finally, merge all possible paths.
-            walk_body_forward(try_stmt.block.statements.iter(), scope, ctx);
+            // Every path through the statement runs the finally block: the
+            // try body finishing, each catch finishing (even one that
+            // returns or rethrows, since the block runs before it leaves),
+            // and an exception no catch takes, which arrives with whatever
+            // the try body had done when it threw.
+            let catch_entry = walk_try_body(try_stmt, scope, ctx);
+            let mut merged = scope.clone();
+            for catch in try_stmt.catch_clauses.iter() {
+                let mut catch_scope = catch_entry.clone();
+                bind_catch_variable(catch, &mut catch_scope, ctx);
+                walk_body_forward(catch.block.statements.iter(), &mut catch_scope, ctx);
+                merged.merge_branch(&catch_scope);
+            }
+            if !catches_everything(try_stmt) {
+                merged.merge_branch(&catch_entry);
+            }
+            *scope = merged;
             walk_body_forward(finally.block.statements.iter(), scope, ctx);
             return;
         }

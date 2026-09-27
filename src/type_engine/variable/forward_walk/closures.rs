@@ -325,6 +325,54 @@ pub(crate) fn try_enter_closure<'b>(
     false
 }
 
+/// Enter `closure` if the cursor is inside its body.
+///
+/// A closure's by-reference captures start out on what its own body may
+/// have written to them, since it can run any number of times before the
+/// cursor's pass.  One invoked where it is written runs exactly once, so
+/// its captures start out on the values they hold there.
+fn try_enter_closure_body<'b>(
+    closure: &'b Closure<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+    inferred_params: Option<&[PhpType]>,
+    invoked_immediately: bool,
+) -> bool {
+    let body_span = closure.body.span();
+    if ctx.cursor_offset < body_span.start.offset || ctx.cursor_offset > body_span.end.offset {
+        return false;
+    }
+    // Create a fresh scope for the closure (closures have isolated scope
+    // in PHP).
+    let mut closure_scope = ScopeState::new();
+
+    seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
+
+    // Seed with parameter types, using callable inference when available.
+    let inferred = inferred_params.unwrap_or(&[]);
+    let filtered_inferred = filter_resolvable_inferred_params(inferred, ctx);
+    seed_closure_params(
+        &mut closure_scope,
+        &closure.parameter_list,
+        closure.span().start.offset,
+        &filtered_inferred,
+        ctx,
+    );
+
+    if !invoked_immediately {
+        let captured = by_ref_captured_names(closure);
+        seed_by_ref_capture_fixed_point(closure, &mut closure_scope, ctx, &captured);
+    }
+
+    {
+        let _barrier = suspend_return_edges();
+        walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
+    }
+
+    *scope = closure_scope;
+    true
+}
+
 /// Recursively search an expression for a closure/arrow function
 /// containing the cursor.
 pub(crate) fn try_enter_closure_expr<'b>(
@@ -335,39 +383,7 @@ pub(crate) fn try_enter_closure_expr<'b>(
 ) -> bool {
     match expr {
         Expression::Closure(closure) => {
-            let body_span = closure.body.span();
-            if ctx.cursor_offset >= body_span.start.offset
-                && ctx.cursor_offset <= body_span.end.offset
-            {
-                // Create a fresh scope for the closure (closures have
-                // isolated scope in PHP).
-                let mut closure_scope = ScopeState::new();
-
-                seed_closure_captures(&mut closure_scope, scope, closure.use_clause.as_ref());
-
-                // Seed with parameter types, using callable inference
-                // when available.
-                let inferred = inferred_params.unwrap_or(&[]);
-                let filtered_inferred = filter_resolvable_inferred_params(inferred, ctx);
-                seed_closure_params(
-                    &mut closure_scope,
-                    &closure.parameter_list,
-                    closure.span().start.offset,
-                    &filtered_inferred,
-                    ctx,
-                );
-
-                let captured = by_ref_captured_names(closure);
-                seed_by_ref_capture_fixed_point(closure, &mut closure_scope, ctx, &captured);
-
-                {
-                    let _barrier = suspend_return_edges();
-                    walk_body_forward(closure.body.statements.iter(), &mut closure_scope, ctx);
-                }
-
-                *scope = closure_scope;
-                return true;
-            }
+            return try_enter_closure_body(closure, scope, ctx, inferred_params, false);
         }
         Expression::ArrowFunction(arrow) => {
             let body_span = arrow.expression.span();
@@ -441,6 +457,19 @@ pub(crate) fn try_enter_closure_expr<'b>(
             {
                 *scope = call_scope;
                 return true;
+            }
+            // An immediately invoked closure (`(function () { … })()`) is
+            // the callee itself.
+            if let Call::Function(fc) = call {
+                let entered = match crate::parser::unwrap_parens(fc.function) {
+                    Expression::Closure(closure) => {
+                        try_enter_closure_body(closure, scope, ctx, None, true)
+                    }
+                    callee => try_enter_closure_expr(callee, scope, ctx, None),
+                };
+                if entered {
+                    return true;
+                }
             }
             // Check if any argument is a closure containing the cursor.
             // Infer callable parameter types from the function/method

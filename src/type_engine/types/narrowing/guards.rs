@@ -27,12 +27,13 @@ use super::*;
 ///   - `class_exists($var)`, `interface_exists($var)`, `enum_exists($var)`,
 ///     `trait_exists($var)` — confirms `$var` names *some* declared
 ///     class-like, narrowing a string to the generic `class-string`
-///     (the target class is not known statically).
+///     (the target class is not known statically), or to
+///     `class-string<UnitEnum>` for `enum_exists()`.
 ///
 /// Returns `Some((target, negated))` where `target` is `Some(name)` for
-/// `is_a()` with a resolvable second argument, or `None` for the generic
-/// `*_exists()` forms.  `negated` is `true` when the guard is wrapped in
-/// `!`.
+/// `is_a()` with a resolvable second argument and for `enum_exists()`, or
+/// `None` for the other `*_exists()` forms.  `negated` is `true` when the
+/// guard is wrapped in `!`.
 pub(in crate::type_engine) fn try_extract_class_string_guard(
     expr: &Expression<'_>,
     var_name: &str,
@@ -74,7 +75,10 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                     if expr_to_subject_key(argument_value(args[0])).as_deref() != Some(var_name) {
                         return None;
                     }
-                    Some((None, false))
+                    // Every enum implements `UnitEnum`, so `enum_exists()`
+                    // knows more than that the name is declared.
+                    let target = (func_name == "enum_exists").then(|| "UnitEnum".to_string());
+                    Some((target, false))
                 }
                 _ => None,
             }

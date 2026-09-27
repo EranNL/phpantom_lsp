@@ -105,7 +105,32 @@ unlikely to move the needle for most users.
 | T10 | [Ternary expression as RHS of list destructuring](todo/type-inference.md#t10-ternary-expression-as-rhs-of-list-destructuring)                                               | Low         | Medium      |
 | T11 | [Nested list destructuring](todo/type-inference.md#t11-nested-list-destructuring)                                                                                           | Low         | Medium      |
 |     | **[Bugs](todo/bugs.md)**                                                                                                                                                    |             |             |
+| B494 | [A nullsafe access does not add `null` for a nullable receiver](todo/bugs.md#b494-a-nullsafe-access-does-not-add-null-for-a-nullable-receiver) | Medium | Low-Medium |
+| B481 | [An element function drops the `false` or `null` an empty array gives](todo/bugs.md#b481-an-element-function-drops-the-false-or-null-an-empty-array-gives) | Medium | Medium |
+| B484 | [`array_merge()` of array literals does not produce the merged shape](todo/bugs.md#b484-array_merge-of-array-literals-does-not-produce-the-merged-shape) | Low-Medium | Medium |
+| B496 | [A static call on an intersection-typed variable or on a property has no type](todo/bugs.md#b496-a-static-call-on-an-intersection-typed-variable-or-on-a-property-has-no-type) | Low-Medium | Medium |
+| B499 | [`array_map()` with a closure that rewrites its parameter keeps the parameter's shape](todo/bugs.md#b499-array_map-with-a-closure-that-rewrites-its-parameter-keeps-the-parameters-shape) | Low-Medium | Medium |
+| B486 | [`strlen()` of a known literal string is not folded](todo/bugs.md#b486-strlen-of-a-known-literal-string-is-not-folded) | Low | Low |
+| B498 | [A variable first introduced by a by-reference closure `use` is not typed `null`](todo/bugs.md#b498-a-variable-first-introduced-by-a-by-reference-closure-use-is-not-typed-null) | Low | Low |
+| B503 | [A conditional on a name that is not a parameter picks the else branch](todo/bugs.md#b503-a-conditional-on-a-name-that-is-not-a-parameter-picks-the-else-branch) | Low | Low |
+| B482 | [Key functions widen the literal keys of an array literal](todo/bugs.md#b482-key-functions-widen-the-literal-keys-of-an-array-literal) | Low | Low-Medium |
+| B488 | [A call proved through `?->` stays narrowed under its `->` spelling when the method is impure](todo/bugs.md#b488-a-call-proved-through---stays-narrowed-under-its---spelling-when-the-method-is-impure) | Low | Low-Medium |
+| B491 | [The receiver of a nullsafe call is not narrowed inside its arguments](todo/bugs.md#b491-the-receiver-of-a-nullsafe-call-is-not-narrowed-inside-its-arguments) | Low | Low-Medium |
+| B502 | [A global constant as a conditional type's target is not resolved to its value](todo/bugs.md#b502-a-global-constant-as-a-conditional-types-target-is-not-resolved-to-its-value) | Low | Low-Medium |
+| B504 | [A conditional type whose subject is a literal is not evaluated](todo/bugs.md#b504-a-conditional-type-whose-subject-is-a-literal-is-not-evaluated) | Low | Low-Medium |
 | B463 | [A method template with a bound is shown as its bound inside the method](todo/bugs.md#b463-a-method-template-with-a-bound-is-shown-as-its-bound-inside-the-method) | Low | High |
+| B483 | [`preg_replace()` over an array shape loses its keys](todo/bugs.md#b483-preg_replace-over-an-array-shape-loses-its-keys) | Low | Medium |
+| B485 | [`array_shift()` does not drop the first entry of a list shape](todo/bugs.md#b485-array_shift-does-not-drop-the-first-entry-of-a-list-shape) | Low | Medium |
+| B487 | [An impure call does not forget what was proved about a static property](todo/bugs.md#b487-an-impure-call-does-not-forget-what-was-proved-about-a-static-property) | Low | Medium |
+| B489 | [A comparison does not narrow a union of float literals](todo/bugs.md#b489-a-comparison-does-not-narrow-a-union-of-float-literals) | Low | Medium |
+| B490 | [`count()` does not size a shape with explicit keys and optional entries](todo/bugs.md#b490-count-does-not-size-a-shape-with-explicit-keys-and-optional-entries) | Low | Medium |
+| B492 | [What the constructor proves about a readonly property of a readonly property is not remembered](todo/bugs.md#b492-what-the-constructor-proves-about-a-readonly-property-of-a-readonly-property-is-not-remembered) | Low | Medium |
+| B495 | [A method on an intersection returns the union of its members' return types](todo/bugs.md#b495-a-method-on-an-intersection-returns-the-union-of-its-members-return-types) | Low | Medium |
+| B497 | [A literal written under a non-literal key is widened on the loop's next pass](todo/bugs.md#b497-a-literal-written-under-a-non-literal-key-is-widened-on-the-loops-next-pass) | Low | Medium |
+| B505 | [A template bound through another template's bound from an empty array does not bind `never`](todo/bugs.md#b505-a-template-bound-through-another-templates-bound-from-an-empty-array-does-not-bind-never) | Low | Medium |
+| B500 | [A key template bound from an array that names only its value type binds the whole array](todo/bugs.md#b500-a-key-template-bound-from-an-array-that-names-only-its-value-type-binds-the-whole-array) | Low | Medium |
+| B501 | [An assertion on `$this` that names a generic class loses the template arguments](todo/bugs.md#b501-an-assertion-on-this-that-names-a-generic-class-loses-the-template-arguments) | Low | Medium |
+| B493 | [A `catch` the try body cannot reach is still merged into `finally`](todo/bugs.md#b493-a-catch-the-try-body-cannot-reach-is-still-merged-into-finally) | Low | Medium-High |
 |     | **[Diagnostics](todo/diagnostics.md)**                                                                                                                                      |             |             |
 | D6  | [Unreachable code diagnostic](todo/diagnostics.md#d6-unreachable-code-diagnostic)                                                                                           | Low-Medium  | Medium      |
 | D16 | [`unreachable_match_arm` ignores literal subject types](todo/diagnostics.md#d16-unreachable_match_arm-ignores-literal-subject-types)                                        | Low-Medium  | Medium      |

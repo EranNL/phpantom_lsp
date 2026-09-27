@@ -1068,6 +1068,18 @@ fn type_condition_result(
         };
     }
     match (type_category(arg_ty), condition_category(condition)) {
+        // `is non-empty-array` asks about the entries, which every array
+        // type shares the category of: only a type that promises an entry
+        // holds it, and only `array{}` refutes it.
+        (Some("array"), Some("array")) if condition.is_provably_non_empty() => {
+            if arg_ty.is_provably_non_empty() {
+                Some(true)
+            } else if arg_ty.is_empty_array_shape() {
+                Some(false)
+            } else {
+                None
+            }
+        }
         (Some(arg_cat), Some(cond_cat)) => Some(arg_cat == cond_cat),
         // A condition that names no scalar category names a class, which the
         // class hierarchy decides (`$id is Arrayable`).

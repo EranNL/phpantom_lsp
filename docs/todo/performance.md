@@ -1333,7 +1333,11 @@ each of those pays the clone.
 
 The same file takes 53 s under the assertType runner in a debug build,
 which is why it is not among the ported fixtures in `tests/phpstan_nsrt/`
-yet; port it once this lands.
+yet; port it once this lands. Re-measured on 2026-09-27 it takes about
+210 s at `HEAD` (5f6422d3), so the cost has grown since. PHPStan's
+`nsrt/filterVar.php` (315 `filter_var()` calls in one function) takes
+about 540 s the same way, and `nsrt/array-functions.php` about 97 s;
+confirm with a profile that they are this item before counting them in.
 
 Caching the resolved `Arc<FunctionInfo>` (and a negative entry) per
 request, keyed by the candidate names, would turn the repeats into

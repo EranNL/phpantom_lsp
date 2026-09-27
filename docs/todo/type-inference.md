@@ -473,6 +473,12 @@ intentional).
 4. Future diagnostic (D-series) can warn on access of possibly-undefined
    variables.
 
+Knowing that a target is definitely set also settles `??=`: on a target
+that is set and never null (a non-nullable parameter, a required shape
+key) the fallback can never be assigned, so `$string ??= 1` is still
+`string`. Today the fallback is always added; the assertions in
+`tests/phpstan_nsrt/coalesce-assign.php` are `// SKIP` against this item.
+
 **References:**
 - Psalm: `Context::$vars_in_scope` and `Context::$vars_possibly_in_scope`
   (`Psalm\Context`)
@@ -607,7 +613,9 @@ to the current class name identically to `Expression::Self_`.
 **Tests to update once fixed:** the `static::`/`$this::` assertions in
 upstream's `nsrt/class-constant-types.php` were dropped when
 `tests/phpstan_nsrt/class-constant-types.php` was ported (only the
-`self::` cases survive); port them back.
+`self::` cases survive); port them back. The `static::`/`$this::`
+assertions in `tests/phpstan_nsrt/class-constant-native-type.php` are
+`// SKIP` against this item.
 
 
 ---

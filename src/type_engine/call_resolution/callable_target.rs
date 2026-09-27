@@ -319,15 +319,8 @@ impl Backend {
         // to declared defaults, upper bounds, or `mixed`.
         let merged = if !owner.template_params.is_empty() {
             let type_args = if class.eq_ignore_ascii_case("parent") {
-                // Look up the child's extends_generics for the parent class
-                rctx.current_class.and_then(|child| {
-                    let parent_short = crate::util::short_name(&owner.name);
-                    child
-                        .extends_generics
-                        .iter()
-                        .find(|(name, _)| crate::util::short_name(name) == parent_short)
-                        .map(|(_, args)| args.clone())
-                })
+                rctx.current_class
+                    .and_then(|child| crate::inheritance::extends_type_args(child, &owner))
             } else {
                 None
             };

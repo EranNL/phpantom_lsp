@@ -519,6 +519,19 @@ pub(crate) fn default_type_args(class: &ClassInfo) -> Vec<PhpType> {
         .collect()
 }
 
+/// The type arguments `child`'s `@extends` tag hands its parent `parent`,
+/// so a call written against the parent from inside the child
+/// (`parent::get()`) sees `@extends Foo<Dog>`'s `Dog` where the parent
+/// says `T`.  `None` when the child does not extend `parent` generically.
+pub(crate) fn extends_type_args(child: &ClassInfo, parent: &ClassInfo) -> Option<Vec<PhpType>> {
+    let parent_short = crate::util::short_name(&parent.name);
+    child
+        .extends_generics
+        .iter()
+        .find(|(name, _)| crate::util::short_name(name) == parent_short)
+        .map(|(_, args)| args.clone())
+}
+
 /// Overlay call-site template values on a class's declared defaults.
 ///
 /// Known receiver or method substitutions take precedence. The borrowed fast

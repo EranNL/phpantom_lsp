@@ -156,8 +156,18 @@ fn constructor_narrowed_properties(
     }
     {
         let _suspend = suspend_snapshot_recording();
-        let _barrier = suspend_return_edges();
+        let return_frame = push_return_frame();
         walk_body_forward(body.statements.iter(), &mut ctor_scope, &walk_ctx);
+        // An object exists once its constructor returns, early or off the
+        // end; a path that throws leaves no object behind to read.
+        let returned = return_frame.finish();
+        let falls_through = !branch_exits_stmts(body.statements.iter(), &ctor_scope, &walk_ctx);
+        match returned {
+            Some(returned) if falls_through => ctor_scope.merge_branch(&returned),
+            Some(returned) => ctor_scope = returned,
+            None if falls_through => {}
+            None => return Vec::new(),
+        }
     }
 
     candidates

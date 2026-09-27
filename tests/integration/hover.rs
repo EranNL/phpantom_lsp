@@ -159,6 +159,37 @@ class Service {
     assert!(text.contains("Target"), "should resolve to Target: {text}");
 }
 
+/// The body of an immediately invoked closure is walked like any other
+/// closure body, so its own variables and `$this` resolve inside it.
+#[test]
+fn hover_variable_inside_immediately_invoked_closure() {
+    let backend = create_test_backend();
+    let uri = "file:///test.php";
+    let content = r#"<?php
+class Target { public function ok(): bool { return true; } }
+class Service {
+    public function run(): void {
+        (function () {
+            $made = new Target();
+            $made;
+            $this;
+        })();
+    }
+}
+"#;
+
+    let hover = hover_at(&backend, uri, content, 6, 13).expect("expected hover on $made");
+    let text = hover_text(&hover);
+    assert!(text.contains("Target"), "should resolve to Target: {text}");
+
+    let hover = hover_at(&backend, uri, content, 7, 13).expect("expected hover on $this");
+    let text = hover_text(&hover);
+    assert!(
+        text.contains("Service"),
+        "should resolve to Service: {text}"
+    );
+}
+
 /// A readonly property holds what the constructor assigned it in every
 /// other method, when that is narrower than the declared type.  An
 /// assignment the constructor only makes on one path, or a property that

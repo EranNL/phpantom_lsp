@@ -40,7 +40,7 @@ pub(super) fn apply_count_size_narrowing(
         return;
     }
     for (counted, other) in [(bin.lhs, bin.rhs), (bin.rhs, bin.lhs)] {
-        let Some(subject) = exact_count_subject(counted) else {
+        let Some((subject, recursive)) = count_call(counted) else {
             continue;
         };
         let Some(size) = known_size(other, scope) else {
@@ -66,6 +66,16 @@ pub(super) fn apply_count_size_narrowing(
         let narrowed: Vec<ResolvedType> = types
             .iter()
             .filter_map(|rt| {
+                // A recursive count adds the entries of nested arrays, so
+                // it is the list's length only when no element is one.
+                if recursive
+                    && !rt
+                        .type_string
+                        .iterable_element_type()
+                        .is_some_and(|element| is_never_an_array(&element))
+                {
+                    return Some(rt.clone());
+                }
                 let sized = list_of_size(&rt.type_string, size as usize);
                 match sized {
                     Some(Some(ty)) => {
@@ -92,17 +102,9 @@ pub(super) fn apply_count_size_narrowing(
     }
 }
 
-/// The subject of a `count($x)` / `sizeof($x)` that counts only the top
-/// level: a second argument (`COUNT_RECURSIVE`) counts nested entries too.
-fn exact_count_subject(expr: &Expression<'_>) -> Option<String> {
-    match count_call(expr)? {
-        (subject, false) => Some(subject),
-        (_, true) => None,
-    }
-}
-
 /// The subject of a `count()` / `sizeof()` call, and whether it passed a
-/// mode argument that may make it count recursively.
+/// mode argument that may make it count recursively: anything but a
+/// written `COUNT_NORMAL` or `0`.
 fn count_call(expr: &Expression<'_>) -> Option<(String, bool)> {
     let Expression::Call(Call::Function(call)) = unwrap_parens(expr) else {
         return None;
@@ -116,8 +118,24 @@ fn count_call(expr: &Expression<'_>) -> Option<(String, bool)> {
     }
     let mut args = call.argument_list.arguments.iter();
     let first = args.next()?;
-    let has_mode = args.next().is_some();
-    Some((expr_to_subject(narrowing::argument_value(first))?, has_mode))
+    let recursive = args
+        .next()
+        .is_some_and(|mode| !is_count_normal(narrowing::argument_value(mode)));
+    Some((
+        expr_to_subject(narrowing::argument_value(first))?,
+        recursive,
+    ))
+}
+
+/// Whether a `count()` mode argument is spelled as the non-recursive mode.
+fn is_count_normal(mode: &Expression<'_>) -> bool {
+    match unwrap_parens(mode) {
+        Expression::ConstantAccess(access) => {
+            crate::util::strip_fqn_prefix(bytes_to_str(access.name.value())) == "COUNT_NORMAL"
+        }
+        Expression::Literal(Literal::Integer(integer)) => integer.value == Some(0),
+        _ => false,
+    }
 }
 
 /// The size `expr` is known to be: an integer literal, or the `count()`
@@ -169,6 +187,8 @@ fn is_never_an_array(ty: &PhpType) -> bool {
             || member.is_true()
             || member.is_false()
             || member.is_null()
+            // `count()` does not look inside an object, `Countable` or not.
+            || (member.is_object_like() && !member.is_array_like() && !member.is_iterable())
     })
 }
 

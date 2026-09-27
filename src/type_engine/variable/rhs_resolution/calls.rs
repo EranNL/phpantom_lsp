@@ -2856,6 +2856,21 @@ pub(super) fn resolve_rhs_static_call(
                 ctx.backend,
             );
             let owner = concrete_owner.as_ref().unwrap_or(owner);
+            // `parent::get()` (or `Foo::get()` written out) from inside a
+            // class that `@extends Foo<Dog>` reads the parent's `T` as the
+            // `Dog` the child bound it to, just as `$this->get()` does.
+            let bound_owner = (!owner.template_params.is_empty())
+                .then(|| crate::inheritance::extends_type_args(ctx.current_class, owner))
+                .flatten()
+                .map(|args| {
+                    crate::virtual_members::resolve_class_fully_with_type_args(
+                        owner,
+                        ctx.class_loader,
+                        ctx.resolved_class_cache,
+                        &args,
+                    )
+                });
+            let owner = bound_owner.as_deref().unwrap_or(owner);
 
             if let Some(result) = try_resolve_config_method_type(
                 &owner.fqn(),

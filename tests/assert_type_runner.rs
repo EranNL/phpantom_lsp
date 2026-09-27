@@ -195,13 +195,23 @@ fn collect_call_text(after_open_paren: &str, lines: &[&str], start_line: usize) 
 fn parse_assert_type_call(
     call_text: &str,
     _source: &str,
-    _lines: &[&str],
+    lines: &[&str],
     line_idx: usize,
 ) -> Option<AssertTypeCall> {
     let text = call_text.trim();
 
     // Parse the first argument (expected type).
-    let (expected, rest) = parse_first_argument(text)?;
+    let (mut expected, mut rest) = parse_first_argument(text)?;
+    let is_class_constant = !text.starts_with(['\'', '"']);
+    if is_class_constant && matches!(expected.as_str(), "self" | "static") {
+        expected = enclosing_class_name(lines, line_idx)?;
+    }
+    // `Foo::class . '|null'` spells the expected type as a concatenation.
+    while let Some(after_dot) = rest.trim_start().strip_prefix('.') {
+        let (suffix, after) = parse_first_argument(after_dot.trim_start())?;
+        expected.push_str(&suffix);
+        rest = after;
+    }
 
     // The rest should start with `,` after optional whitespace.
     let rest = rest.trim_start();
@@ -218,6 +228,29 @@ fn parse_assert_type_call(
         original_line: line_idx + 1,
         line_count: 1,
         in_line: None,
+    })
+}
+
+/// The class-like declared nearest above `line_idx`, which is the one an
+/// assertion's `self::class` names: fixtures declare one class after
+/// another, each closing before the next opens.
+fn enclosing_class_name(lines: &[&str], line_idx: usize) -> Option<String> {
+    lines[..=line_idx].iter().rev().find_map(|line| {
+        let mut words = line.split_whitespace();
+        while let Some(word) = words.next() {
+            if matches!(word, "class" | "interface" | "trait" | "enum") {
+                let name: String = words
+                    .next()?
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                return (!name.is_empty()).then_some(name);
+            }
+            if word.starts_with("//") || word.starts_with('*') {
+                return None;
+            }
+        }
+        None
     })
 }
 
@@ -565,7 +598,11 @@ fn normalize_type(ty: &str) -> String {
         }
     }
 
-    let result = expand_nested_nullable(&result)
+    let result = expand_array_key(&expand_nested_nullable(&result))
+        .replace("non-negative-int", "int<0, max>")
+        .replace("non-positive-int", "int<min, 0>")
+        .replace("positive-int", "int<1, max>")
+        .replace("negative-int", "int<min, -1>")
         .replace("array<mixed, mixed>", "array")
         .replace("array<mixed>", "array")
         .replace("non-empty-array<int|string, ", "non-empty-array<")
@@ -575,6 +612,28 @@ fn normalize_type(ty: &str) -> String {
             &result,
         ))),
     ))
+}
+
+/// Spell `array-key` as the `int|string` union it stands for, which is how
+/// PHPStan prints it (`list<(int|string)>`).
+fn expand_array_key(ty: &str) -> String {
+    const KEYWORD: &str = "array-key";
+    let is_name_char = |c: char| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\');
+    let mut out = String::with_capacity(ty.len());
+    let mut rest = ty;
+    while let Some(at) = rest.find(KEYWORD) {
+        let before = rest[..at].chars().last().or(out.chars().last());
+        let after = rest[at + KEYWORD.len()..].chars().next();
+        out.push_str(&rest[..at]);
+        if before.is_some_and(is_name_char) || after.is_some_and(is_name_char) {
+            out.push_str(KEYWORD);
+        } else {
+            out.push_str("int|string");
+        }
+        rest = &rest[at + KEYWORD.len()..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Drop the parentheses PHPStan puts around a union nested inside another

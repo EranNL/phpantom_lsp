@@ -28,6 +28,8 @@ pub fn apply_class_stub_patches(class: &mut ClassInfo) {
         "ReflectionClass" => patch_reflection_class(class),
         "ReflectionObject" => patch_reflection_object(class),
         "DOMNamedNodeMap" => patch_dom_named_node_map(class),
+        "DOMNode" => patch_dom_node(class),
+        "DOMElement" => patch_dom_element(class),
         _ => {}
     }
     mark_benevolent_methods(class);
@@ -449,6 +451,53 @@ fn patch_dom_named_node_map(class: &mut ClassInfo) {
         PhpType::null(),
     ]));
     class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Let `DOMNode::hasAttributes()` prove `$attributes` is not null.
+///
+/// Only an element has an attribute map, so a node that has attributes is
+/// one.  The tag is the equality form (`!=null`) because the promise is
+/// one-way: an element without attributes answers false and still has an
+/// (empty) map, so the false branch must not narrow to `null`.
+fn patch_dom_node(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .methods
+        .iter()
+        .position(|m| m.name.eq_ignore_ascii_case("hasAttributes"))
+    else {
+        return;
+    };
+    let mut method = (*class.methods[idx]).clone();
+    method.type_assertions.push(crate::types::TypeAssertion {
+        kind: crate::types::AssertionKind::IfTrue,
+        param_name: "$this->attributes".to_string(),
+        asserted_type: PhpType::null(),
+        negated: true,
+        is_equality: true,
+    });
+    class.methods.make_mut()[idx] = std::sync::Arc::new(method);
+}
+
+/// Drop the `null` from `DOMElement::$attributes`.
+///
+/// The property is inherited from `DOMNode`, where it is null for every
+/// node that is not an element, and the stub keeps the native
+/// `DOMNamedNodeMap|null` on the element's redeclaration too, so its
+/// `@var DOMNamedNodeMap<DOMAttr>` only refines the non-null half.  An
+/// element always has an attribute map (empty when it has no attributes).
+fn patch_dom_element(class: &mut ClassInfo) {
+    let Some(idx) = class
+        .properties
+        .iter()
+        .position(|p| p.name.as_str() == "attributes")
+    else {
+        return;
+    };
+    let mut property = (*class.properties[idx]).clone();
+    let map = PhpType::generic("DOMNamedNodeMap", vec![PhpType::named(atom("DOMAttr"))]);
+    property.native_type_hint = Some(PhpType::named(atom("DOMNamedNodeMap")));
+    property.type_hint = Some(map);
+    class.properties.make_mut()[idx] = std::sync::Arc::new(property);
 }
 
 /// Give `SimpleXMLElement::asXML()` / `saveXML()` a conditional return type
