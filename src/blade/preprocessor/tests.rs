@@ -376,7 +376,7 @@ fn test_preprocess_dump_directive_consumes_argument() {
 
 /// The directives a project registered, as the provider scan would have
 /// recorded them.
-fn registered(names: &[(&str, bool)]) -> CustomDirectives {
+fn registered(names: &[(&str, bool)]) -> BladeDirectives {
     let registrations: Vec<super::super::directives::CustomDirective> = names
         .iter()
         .map(
@@ -386,13 +386,13 @@ fn registered(names: &[(&str, bool)]) -> CustomDirectives {
             },
         )
         .collect();
-    CustomDirectives::from_registrations(&registrations)
+    BladeDirectives::from_registrations(&registrations)
 }
 
 /// The wrapped template body of a preprocessed template, without the
 /// prologue — whose marker declarations would otherwise answer a search
 /// for a marker the body never calls.
-fn preprocess_with_directives(content: &str, directives: &CustomDirectives) -> String {
+fn preprocess_with_directives(content: &str, directives: &BladeDirectives) -> String {
     let (php, _) = preprocess_with_vars(content, &[], TemplateKind::View, None, None, directives);
     let body_start = php
         .find("global $errors")
@@ -475,10 +475,27 @@ fn a_registered_condition_without_arguments_is_still_balanced() {
 /// inert markup, with its argument not read as PHP at all.
 #[test]
 fn an_unregistered_directive_stays_masked() {
-    let php = preprocess_with_directives("<p>@datetime($x)</p>", &CustomDirectives::default());
+    let php = preprocess_with_directives("<p>@datetime($x)</p>", &BladeDirectives::default());
     assert!(
         !php.contains("blade_custom_directive") && !php.contains("$x"),
         "an unregistered directive must stay masked: {php}"
+    );
+}
+
+/// A built-in directive the installed compiler predates is the text Blade
+/// leaves it as, so a JSON-LD `"@context"` key on such a Laravel opens no
+/// block for the rest of the template to be parsed inside.
+#[test]
+fn a_built_in_directive_the_compiler_lacks_stays_text() {
+    let has_method = |name: &str| name.eq_ignore_ascii_case("compileIf");
+    let directives = BladeDirectives::new(Some(&has_method), &[]);
+    let php = preprocess_with_directives(
+        "<script type=\"application/ld+json\">{\"@context\": \"https://schema.org\"}</script>",
+        &directives,
+    );
+    assert!(
+        !php.contains("if"),
+        "@context must not lower to anything: {php}"
     );
 }
 

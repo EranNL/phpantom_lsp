@@ -1,13 +1,11 @@
 use super::shared::{LineOut, Lowering, closes_args, flush_buffer};
 use super::{CapturedDirective, Mode};
-use crate::blade::directives::{
-    CUSTOM_MARKER, CustomDirectives, CustomForm, match_directive, translate_directive,
-};
+use crate::blade::directives::{BladeDirectives, CUSTOM_MARKER, CustomForm, translate_directive};
 
 /// An `@name` directive opening at the cursor.
 pub(super) fn open(
     remaining: &[char],
-    custom_directives: &CustomDirectives,
+    directives: &BladeDirectives,
     paren_depth: &mut i32,
     in_php_directive_block: &mut bool,
 ) -> Option<Lowering> {
@@ -17,7 +15,7 @@ pub(super) fn open(
 
     if remaining.starts_with(&['@']) {
         let rest_str: String = remaining[1..].iter().collect();
-        if let Some(directive) = match_directive(&rest_str) {
+        if let Some(directive) = directives.builtin(&rest_str) {
             match_len = 1 + directive.len();
             if directive == "php" {
                 let after_php = rest_str[3..].trim_start();
@@ -254,7 +252,7 @@ pub(super) fn open(
                 replacement = format!(" {}; ", translate_directive(directive));
                 next_mode = Mode::Php(false);
             }
-        } else if let Some((name, form)) = custom_directives.match_directive(&rest_str) {
+        } else if let Some((name, form)) = directives.custom(&rest_str) {
             // A directive one of the project's service providers
             // registered. Blade's own compiler checks its custom
             // table *before* its built-in directives, but a

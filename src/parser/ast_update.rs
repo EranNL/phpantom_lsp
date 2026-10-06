@@ -447,14 +447,14 @@ impl Backend {
         // Read under the guard rather than cloned: the set is small but
         // this runs on every keystroke in a template, and nothing the
         // preprocessor does can write it back.
-        let custom_directives = self.blade_custom_directives.read();
+        let directives = self.blade_directives.read();
         let (virtual_php, source_map) = crate::blade::preprocessor::preprocess_with_vars(
             content,
             &injected.vars,
             crate::blade::template_kind(uri, content),
             injected.this_class.as_deref(),
             Some(&components),
-            &custom_directives,
+            &directives,
         );
         Some(BladeLowering {
             virtual_php: Arc::new(virtual_php),

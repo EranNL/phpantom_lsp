@@ -1,5 +1,5 @@
 use super::TemplateKind;
-use super::directives::CustomDirectives;
+use super::directives::BladeDirectives;
 use super::source_map::BladeSourceMap;
 
 mod capture_args;
@@ -86,7 +86,7 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
         TemplateKind::View,
         None,
         None,
-        &CustomDirectives::default(),
+        &BladeDirectives::default(),
     )
 }
 
@@ -124,17 +124,20 @@ pub fn preprocess(content: &str) -> (String, BladeSourceMap) {
 /// the arguments the framework passes them as.  Without one (or for a tag
 /// it cannot answer for) the tag degrades to a comment.
 ///
-/// `custom_directives` are the ones the project's service providers
-/// registered with `Blade::directive()` / `Blade::if()`.  A directive in
-/// that set lowers to a marker call keeping its argument as real PHP,
-/// instead of degrading to the comment an unrecognised `@name` becomes.
+/// `directives` are the ones the project's Blade compiler has: the
+/// built-in ones it defines, and the ones its service providers
+/// registered with `Blade::directive()` / `Blade::if()`.  A registered
+/// directive lowers to a marker call keeping its argument as real PHP,
+/// instead of degrading to the comment an unrecognised `@name` becomes,
+/// and a built-in one the installed compiler lacks stays the plain text
+/// Blade leaves it as.
 pub fn preprocess_with_vars(
     content: &str,
     injected_vars: &[(String, String)],
     kind: TemplateKind,
     this_class: Option<&str>,
     components: Option<&dyn ComponentResolver>,
-    custom_directives: &CustomDirectives,
+    directives: &BladeDirectives,
 ) -> (String, BladeSourceMap) {
     let mut virtual_php = String::with_capacity(content.len() + 512);
     let mut source_map = BladeSourceMap::default();
@@ -347,7 +350,7 @@ pub fn preprocess_with_vars(
                     // `support@foreach.example` is text, not a loop.
                     directive::open(
                         remaining,
-                        custom_directives,
+                        directives,
                         &mut paren_depth,
                         &mut in_php_directive_block,
                     )
@@ -367,16 +370,12 @@ pub fn preprocess_with_vars(
                     lowering = matched;
                 }
             } else if let Mode::EscapedEcho(raw) = mode {
-                lowering = echo::close_escaped(raw, remaining, custom_directives);
+                lowering = echo::close_escaped(raw, remaining, directives);
             } else if mode == Mode::Comment {
                 lowering = echo::close_comment(remaining, &line_chars, char_idx);
             } else if let Mode::Php(raw_echo) = mode {
-                lowering = echo::close_php(
-                    raw_echo,
-                    remaining,
-                    &mut in_php_directive_block,
-                    custom_directives,
-                );
+                lowering =
+                    echo::close_php(raw_echo, remaining, &mut in_php_directive_block, directives);
             } else if let Mode::RawPhp(needs_semicolon) = mode {
                 lowering = php_island::close(needs_semicolon, remaining);
             } else if let Mode::DirectiveArgs(suffix) = mode {

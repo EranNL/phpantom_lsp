@@ -10,6 +10,7 @@ mod blade_custom_directives;
 pub mod blade_debug;
 pub mod blade_error;
 mod blade_imports;
+mod blade_installed_directives;
 mod blade_layout;
 mod blade_preprocessing;
 pub mod blade_regression;

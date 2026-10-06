@@ -168,7 +168,7 @@ pub(crate) struct ProviderResources {
     /// registrations, in registration order.  These name directives the
     /// preprocessor would otherwise mask as comments, and the four members
     /// of a `Blade::if()` family are expanded from the single name recorded
-    /// here (`crate::blade::directives::CustomDirectives`).
+    /// here (`crate::blade::directives::BladeDirectives`).
     pub custom_directives: Vec<crate::blade::directives::CustomDirective>,
     /// `View::share('key', $value)` registrations, which put a variable in
     /// every template's scope.
