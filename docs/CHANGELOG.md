@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.
 - **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
+- **Code that calls undefined functions is analyzed much faster.** A function call that resolves to nothing (a missing helper, a function from a package that isn't installed) re-ran the full lookup, including a scan over every Composer-autoloaded file, each time analysis passed over it. Legacy files full of such calls could take minutes; the failed lookup is now remembered, and forgotten again the moment a file declaring the function is indexed or opened.
 
 ### Fixed
 
