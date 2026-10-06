@@ -137,6 +137,37 @@ pub(crate) use helpers::{
     sort_edits_by_position,
 };
 
+/// When the request range starts in whitespace, return a copy of `params`
+/// whose start is the first non-whitespace byte inside the range (or, for a
+/// collapsed range, on the same line), so member collectors that match the
+/// start offset against a member span still find the member.
+fn skip_leading_whitespace(content: &str, params: &CodeActionParams) -> Option<CodeActionParams> {
+    use crate::text_position::{offset_to_position, position_to_byte_offset};
+
+    let start = position_to_byte_offset(content, params.range.start);
+    let end = position_to_byte_offset(content, params.range.end);
+    let collapsed = end <= start;
+    let rest = content.get(start..)?;
+    let limit = if collapsed {
+        rest.find('\n').unwrap_or(rest.len())
+    } else {
+        (end - start).min(rest.len())
+    };
+    let window = rest.get(..limit).unwrap_or(rest);
+    let skipped = window.len() - window.trim_start().len();
+    if skipped == 0 || skipped == window.len() {
+        return None;
+    }
+
+    let new_start = offset_to_position(content, start + skipped);
+    let mut adjusted = params.clone();
+    adjusted.range.start = new_start;
+    if collapsed {
+        adjusted.range.end = new_start;
+    }
+    Some(adjusted)
+}
+
 impl Backend {
     /// Handle a `textDocument/codeAction` request.
     ///
@@ -151,6 +182,9 @@ impl Backend {
         params: &CodeActionParams,
     ) -> Vec<CodeActionOrCommand> {
         let mut actions = Vec::new();
+
+        let adjusted = skip_leading_whitespace(content, params);
+        let params = adjusted.as_ref().unwrap_or(params);
 
         // Parse the file once and share the result across every collector
         // below.  Each collector resolves cursor context by walking the

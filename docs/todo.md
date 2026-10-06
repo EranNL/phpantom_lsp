@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 | P68  | [Body return-type inference re-parses the declaring file every time](todo/performance.md#p68-body-return-type-inference-re-parses-the-declaring-file-every-time) | Medium | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
