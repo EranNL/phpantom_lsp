@@ -30,13 +30,12 @@ contributor even though it's short.
 
 # Scheduled Sprints
 
-## Sprint 7 — 0.11.0 Blade support
+## Sprint 8 — 0.11.0 Blade support
 
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
-|     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
-|      | **Release 0.11.0**                                                                                                                                        |             |             |
+|      | **Release 0.11.1**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
 
