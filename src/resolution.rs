@@ -1237,9 +1237,19 @@ impl Backend {
         }
 
         // Cache the negative result so subsequent lookups for the same
-        // unknown function skip the fallback phases.
+        // unknown function skip the fallback phases.  Another thread may
+        // have parsed a file declaring one of the candidates since Phase 1
+        // (Phase 1.75 skips files it did not parse itself), so re-check
+        // under the write lock: `update_ast` inserts into
+        // `global_functions` before it retires negatives, so either the
+        // declaration is visible here or its retirement runs after us.
         {
             let mut nf_cache = self.symbols.function_not_found_cache.write();
+            let fmap = self.symbols.global_functions.read();
+            if let Some((_, info)) = candidates.iter().find_map(|&name| fmap.get(name)) {
+                return Some(info.clone());
+            }
+            drop(fmap);
             for &name in candidates {
                 nf_cache.insert(name);
             }

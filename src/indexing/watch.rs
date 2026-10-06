@@ -770,6 +770,26 @@ mod tests {
         );
     }
 
+    /// A function-only file written to disk declares no class, so the
+    /// class caches survive, but a function looked up and missed before
+    /// the file existed must resolve afterwards.
+    #[test]
+    fn function_only_file_events_retire_function_misses() {
+        let dir = tempfile::tempdir().unwrap();
+        let helpers = dir.path().join("helpers.php");
+
+        let backend = Backend::new_test();
+        assert!(backend.find_or_load_function(&["myHelper"]).is_none());
+
+        std::fs::write(&helpers, "<?php function myHelper() {}").unwrap();
+        backend.apply_watched_file_changes(&created_event(&helpers), dir.path());
+
+        assert!(
+            backend.find_or_load_function(&["myHelper"]).is_some(),
+            "the recorded miss must not outlive the declaring file's creation"
+        );
+    }
+
     /// Laravel config files declare nothing but feed class resolution
     /// (aliases, the auth model, storage disks), so a change under a
     /// `config` directory keeps the conservative full clear.
