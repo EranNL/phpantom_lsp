@@ -1197,34 +1197,6 @@ cloning only the items that survive.
 `filter_member_completion_items` in
 `completion/handler/member_access.rs`.
 
-## P63. Every diagnostic converts its offsets by counting from the top of the file
-
-**Impact: High · Complexity: Low**
-
-`offset_range_to_lsp_range` (`diagnostics/mod.rs`) turns a diagnostic's
-byte span into an LSP range through `byte_range_to_lsp_range`, which
-calls `offset_to_position` twice, and that walks `content.char_indices()`
-from byte 0 every time. There are around fifty call sites building
-diagnostic ranges this way, so a file reports each of its diagnostics at
-a cost proportional to how far down the file it sits, and a pass over one
-file costs O(size × diagnostics).
-
-`vendor/nikic/php-parser/lib/PhpParser/Parser/Php7.php` (2,927 lines,
-150 KB) reports 2,222 diagnostics, and sampling the diagnostic worker
-there puts 69% of the stacks in `byte_range_to_lsp_range` alone, ahead of
-the whole type engine.
-
-`text_position::LineIndex` already exists for exactly this and documents
-the quadratic it avoids; semantic tokens, code lenses, and inlay hints
-were moved onto it. The diagnostic collectors were not, and they produce
-far more positions per file than any of those. Build one index per file
-per pass and answer every collector's range from it.
-
-**Where to look:** the free `offset_range_to_lsp_range` and
-`Backend::offset_range_to_lsp_range` in `diagnostics/mod.rs`,
-`offset_to_position`/`LineIndex` in `text_position.rs`, and the
-collectors under `diagnostics/` that call them.
-
 ## P64. A file with one very large scope copies it at every branch
 
 **Impact: Medium · Complexity: Medium-High**

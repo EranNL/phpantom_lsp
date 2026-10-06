@@ -35,7 +35,6 @@ contributor even though it's short.
 | #    | Item                                                                                                                                                      | Impact      | Complexity  |
 | ---- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------- | ----------- |
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
-| P63  | [Every diagnostic converts its offsets by counting from the top of the file](todo/performance.md#p63-every-diagnostic-converts-its-offsets-by-counting-from-the-top-of-the-file) | High | Low |
 | C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | L55  | [JSON translation key navigation lands on line 0, not the key](todo/laravel.md#l55-json-translation-key-navigation-lands-on-line-0-not-the-key) | Medium-High | Medium-High |
