@@ -1371,3 +1371,91 @@ set of removed names, turning the filter into set lookups.
 
 **Where to look:** `set_php_version` in `lib.rs` and the
 `is_stub_*_removed` family in `stubs.rs`.
+
+---
+
+## P67. The Blade refresh pass forgets every inferred return type between caller files
+
+**Impact: Medium · Complexity: Medium**
+
+`refresh_blade_injected_vars` runs once after workspace indexing (and in
+`analyze`) to type the variables each template receives from its
+`view()` call sites. The type-engine memos are scoped to one caller
+file, so a controller that renders many templates is walked again for
+each of them, and every method-body inference it triggers is repeated.
+On a Laravel 8 project with ~600 files and largely untyped controllers,
+one controller rendering 48 templates accounted for a fifth of the
+pass, and the pass as a whole is still about 2.7 s of a 4.2 s release
+`analyze`, all on one core.
+
+The body-inference memo is keyed by `(class FQN, method, argument
+types)` and holds nothing tied to a particular text buffer, so it can
+safely span the whole pass. The variable-type memo cannot: its key
+includes the address of the content it walked, and the pass replaces
+templates' virtual PHP as it goes, so a freed buffer reused at the same
+address would serve stale entries. Activate the body-inference memo
+around the whole pass and keep the per-file guard for the others.
+
+**Where to look:** `refresh_blade_injected_vars` and
+`extract_call_site_vars` in `blade/call_site_inference.rs`;
+`activate_type_engine_caches` in
+`type_engine/call_resolution/target_cache.rs`.
+
+---
+
+## P68. Body return-type inference re-parses the declaring file every time
+
+**Impact: Medium · Complexity: Medium-High**
+
+`infer_return_type_for_function` reads the declaring file's text and
+parses it from scratch through `with_parsed_program` for every body it
+infers, and `infer_body_return_type` additionally splits the whole file
+into lines twice to locate the declaration. The cost is proportional to
+the size of the declaring file rather than the method. A 23,000-line
+`_ide_helper.php` (now excluded by default) made every inference of one
+of its facade methods cost a full parse of the file, and memo misses
+across call sites multiplied that into minutes. Any large hand-written
+or generated class with untyped methods has the same shape.
+
+Caching the parsed program per file for the duration of a pass (or
+inferring from an AST the caller already holds when the method lives in
+the file being walked), and locating the body by `name_offset` instead
+of by scanning lines, would make each inference cost the size of the
+method body.
+
+The forward walker has the same shape closer to home:
+`function_invokes_callable_arg_immediately` re-parses the very file
+being walked to find out whether a function declared in it is tagged
+`@param-later-invoked-callable`, once per closure argument passed to a
+function call. It no longer runs for arguments that are not closures,
+but a template or script that passes many closures pays one full parse
+of itself for each.
+
+**Where to look:** `infer_body_return_type` in
+`type_engine/call_resolution/target_cache.rs`,
+`infer_return_type_for_function` in
+`code_actions/phpstan/fix_return_type/inference.rs`, and
+`function_invokes_callable_arg_immediately` in
+`type_engine/variable/forward_walk/by_ref.rs`.
+
+---
+
+## P69. The Blade refresh pass runs on a single core
+
+**Impact: Medium · Complexity: High**
+
+`refresh_blade_injected_vars` re-infers every template serially, in
+render order, while the remaining cores sit idle. On a project with
+many templates and untyped controllers this is the bulk of workspace
+indexing (users see "Full index running" at 100% of one core).
+
+The order matters only along render edges: a partial is re-inferred
+after the templates that `@include` it, because its types are read out
+of their virtual PHP. Templates in the same layer of
+`blade_render_order` do not depend on each other, so each layer can be
+inferred in parallel, as long as `update_ast` for one layer has
+finished before the next starts. Caller files that are plain PHP never
+change during the pass.
+
+**Where to look:** `refresh_blade_injected_vars` and
+`blade_render_order` in `blade/call_site_inference.rs`.

@@ -1029,6 +1029,8 @@ impl Backend {
         offsets: &[u32],
     ) -> Vec<ResolvedViewCall> {
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _cache_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loaders = self.class_loaders(&file_ctx);
         let function_loaders = self.function_loaders(&file_ctx);
@@ -1228,6 +1230,8 @@ impl Backend {
         occurrences: Vec<crate::blade::component_tags::ComponentTagCall>,
     ) -> Vec<InferredVars> {
         let _resolver_guard = crate::type_engine::call_resolution::activate_type_engine_caches();
+        let _cache_guard =
+            crate::virtual_members::with_active_resolved_class_cache(&self.resolved_class_cache);
         let file_ctx = self.file_context(uri);
         let class_loader = self.class_loader(&file_ctx);
         let function_loader = self.function_loader(&file_ctx);

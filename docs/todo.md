@@ -39,8 +39,11 @@ contributor even though it's short.
 | C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
 | L55  | [JSON translation key navigation lands on line 0, not the key](todo/laravel.md#l55-json-translation-key-navigation-lands-on-line-0-not-the-key) | Medium-High | Medium-High |
+| P67  | [The Blade refresh pass forgets every inferred return type between caller files](todo/performance.md#p67-the-blade-refresh-pass-forgets-every-inferred-return-type-between-caller-files) | Medium | Medium |
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
+| P68  | [Body return-type inference re-parses the declaring file every time](todo/performance.md#p68-body-return-type-inference-re-parses-the-declaring-file-every-time) | Medium | Medium-High |
+| P69  | [The Blade refresh pass runs on a single core](todo/performance.md#p69-the-blade-refresh-pass-runs-on-a-single-core) | Medium | High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions
