@@ -159,6 +159,39 @@ pub(crate) fn body_inference_in_progress() -> bool {
     BODY_INFER_DEPTH.with(|cell| cell.get()) > 0
 }
 
+/// A hash of everything about the body-return inferences in progress
+/// that can change what an expression inside them resolves to, or `0`
+/// when none is running.
+///
+/// That is the call-site arguments seeding each body, plus the bodies
+/// being inferred: they decide which nested inferences the re-entry
+/// guard turns away, and how many levels the depth cap still allows.
+/// Two lookups made under the same context reach the same answer, so a
+/// memo keyed on it can serve both.
+pub(crate) fn body_inference_context() -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let depth = BODY_INFER_DEPTH.with(Cell::get);
+    if depth == 0 {
+        return 0;
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    depth.hash(&mut hasher);
+    // A set has no order to hash in, so fold each member's own hash
+    // with an order-independent sum.
+    let visited = BODY_INFER_VISITED.with(|set| {
+        set.borrow().iter().fold(0u64, |sum, key| {
+            let mut member = std::collections::hash_map::DefaultHasher::new();
+            key.hash(&mut member);
+            sum.wrapping_add(member.finish())
+        })
+    });
+    visited.hash(&mut hasher);
+    BODY_INFER_ARGS.with(|cell| cell.borrow().hash(&mut hasher));
+    // Never `0`, which stands for "no inference running".
+    hasher.finish() | 1
+}
+
 /// Maximum nesting depth for body return inference chains.
 ///
 /// A→B→C is 3 levels deep.  Real PHP code rarely has long chains of

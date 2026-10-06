@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 #### Performance and memory
 
 - **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.
+- **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
 
 ### Fixed
 
