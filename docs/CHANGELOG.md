@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **laravel-ide-helper files are skipped.** `_ide_helper.php` and `_ide_helper_models.php` are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading `!` in `[indexing] exclude` to index them anyway.
+- **PHP_CodeSniffer only runs on projects that use it.** A `vendor/bin/phpcs` installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need `squizlabs/php_codesniffer` in `require-dev`, a PHPCS ruleset file, or a `[phpcs] standard` in `.phpantom.toml`.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
 
 ## [0.11.0] - 2026-10-05
