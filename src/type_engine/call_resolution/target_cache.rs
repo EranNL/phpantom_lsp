@@ -52,7 +52,8 @@ thread_local! {
 
     /// When `Some`, memoizes completed body return inference results by
     /// `(FQN, method)`.  Cleared when the owning guard drops, so the memo
-    /// lives exactly as long as one request / one file's diagnostic pass.
+    /// lives as long as one request / one file's diagnostic pass, or the
+    /// whole Blade refresh pass (see [`activate_body_infer_memo`]).
     ///
     /// Without this memo, every call site that needs a method's inferred
     /// return type re-walks the entire method body.  On large legacy
@@ -106,6 +107,20 @@ type BodyInferMemoGuard = crate::type_engine::MemoGuard<BodyInferMemo>;
 
 fn with_body_infer_memo() -> BodyInferMemoGuard {
     crate::type_engine::activate_memo(&BODY_INFER_MEMO)
+}
+
+/// Activate only the body-return-inference memo, for a pass that walks
+/// many files and wants the inferences one file paid for to serve the
+/// rest.
+///
+/// Unlike the other request-scoped memos, this one holds nothing tied to
+/// a particular text buffer: its key is the method and the argument
+/// types, and the body is re-read from the declaring file on a miss.  It
+/// can therefore outlive the per-file [`activate_type_engine_caches`]
+/// scopes nested inside the pass, which leave it alone because nested
+/// activation is a no-op.
+pub(crate) fn activate_body_infer_memo() -> impl Drop {
+    with_body_infer_memo()
 }
 
 // ── Call-site argument frames ───────────────────────────────────────────────

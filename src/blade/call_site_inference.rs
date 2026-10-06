@@ -525,6 +525,14 @@ impl Backend {
         // templates.
         let shared = self.view_caller_snapshot();
         let shared_blade = self.blade_caller_snapshot();
+        // A controller that renders many templates is walked once per
+        // template, and every method body it infers a return type from
+        // would be walked again each time.  The other type-engine memos
+        // stay scoped to one caller file: their keys include the address
+        // of the content they walked, and this pass replaces templates'
+        // virtual PHP as it goes, so a freed buffer reused at the same
+        // address could serve stale entries.
+        let _body_infer_memo = crate::type_engine::call_resolution::activate_body_infer_memo();
         for uri in self.blade_render_order(blade_uris) {
             let Some(content) = self.get_file_content(&uri) else {
                 continue;

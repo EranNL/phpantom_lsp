@@ -1346,35 +1346,6 @@ set of removed names, turning the filter into set lookups.
 
 ---
 
-## P67. The Blade refresh pass forgets every inferred return type between caller files
-
-**Impact: Medium · Complexity: Medium**
-
-`refresh_blade_injected_vars` runs once after workspace indexing (and in
-`analyze`) to type the variables each template receives from its
-`view()` call sites. The type-engine memos are scoped to one caller
-file, so a controller that renders many templates is walked again for
-each of them, and every method-body inference it triggers is repeated.
-On a Laravel 8 project with ~600 files and largely untyped controllers,
-one controller rendering 48 templates accounted for a fifth of the
-pass, and the pass as a whole is still about 2.7 s of a 4.2 s release
-`analyze`, all on one core.
-
-The body-inference memo is keyed by `(class FQN, method, argument
-types)` and holds nothing tied to a particular text buffer, so it can
-safely span the whole pass. The variable-type memo cannot: its key
-includes the address of the content it walked, and the pass replaces
-templates' virtual PHP as it goes, so a freed buffer reused at the same
-address would serve stale entries. Activate the body-inference memo
-around the whole pass and keep the per-file guard for the others.
-
-**Where to look:** `refresh_blade_injected_vars` and
-`extract_call_site_vars` in `blade/call_site_inference.rs`;
-`activate_type_engine_caches` in
-`type_engine/call_resolution/target_cache.rs`.
-
----
-
 ## P68. Body return-type inference re-parses the declaring file every time
 
 **Impact: Medium · Complexity: Medium-High**
