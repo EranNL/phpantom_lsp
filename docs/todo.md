@@ -40,7 +40,6 @@ contributor even though it's short.
 | P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 | P68  | [Body return-type inference re-parses the declaring file every time](todo/performance.md#p68-body-return-type-inference-re-parses-the-declaring-file-every-time) | Medium | Medium-High |
-| P69  | [The Blade refresh pass runs on a single core](todo/performance.md#p69-the-blade-refresh-pass-runs-on-a-single-core) | Medium | High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
 
 ## Sprint 8 — 1.0 release & IDE extensions

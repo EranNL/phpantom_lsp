@@ -1380,25 +1380,3 @@ of itself for each.
 `code_actions/phpstan/fix_return_type/inference.rs`, and
 `function_invokes_callable_arg_immediately` in
 `type_engine/variable/forward_walk/by_ref.rs`.
-
----
-
-## P69. The Blade refresh pass runs on a single core
-
-**Impact: Medium · Complexity: High**
-
-`refresh_blade_injected_vars` re-infers every template serially, in
-render order, while the remaining cores sit idle. On a project with
-many templates and untyped controllers this is the bulk of workspace
-indexing (users see "Full index running" at 100% of one core).
-
-The order matters only along render edges: a partial is re-inferred
-after the templates that `@include` it, because its types are read out
-of their virtual PHP. Templates in the same layer of
-`blade_render_order` do not depend on each other, so each layer can be
-inferred in parallel, as long as `update_ast` for one layer has
-finished before the next starts. Caller files that are plain PHP never
-change during the pass.
-
-**Where to look:** `refresh_blade_injected_vars` and
-`blade_render_order` in `blade/call_site_inference.rs`.

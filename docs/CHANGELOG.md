@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 #### Performance and memory
 
-- **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster.
+- **Indexing Blade templates with no DocBlock is now much faster.** Templates without a DocBlock declaring their variables have those variables inferred from the controllers that render them, and that is now much faster. The work is also spread across every core.
 - **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
 - **Code that calls undefined functions is analyzed much faster.** Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.
 - **Files with many diagnostics are reported much faster.** Large files that produce thousands of diagnostics no longer spend most of their time locating each one.
