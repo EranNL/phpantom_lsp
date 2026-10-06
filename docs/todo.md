@@ -37,7 +37,6 @@ contributor even though it's short.
 |     | Clear [refactoring gate](todo/refactor.md)                                                                                                                      | —           | —           |
 | C14  | [`examples/php` has no demo for an assignment inside a `match` arm or ternary branch](todo/completion.md#c14-examplesphp-has-no-demo-for-an-assignment-inside-a-match-arm-or-ternary-branch) | Low | Low |
 | A47  | [Member actions are missing when the range starts in the indentation](todo/actions.md#a47-member-actions-are-missing-when-the-range-starts-in-the-indentation) | Medium | Low-Medium |
-| P64  | [A file with one very large scope copies it at every branch](todo/performance.md#p64-a-file-with-one-very-large-scope-copies-it-at-every-branch) | Medium | Medium-High |
 | BL1  | [Blade-aware code actions](todo/blade.md#bl1-blade-aware-code-actions)                                                      | Medium     | Medium-High |
 | P68  | [Body return-type inference re-parses the declaring file every time](todo/performance.md#p68-body-return-type-inference-re-parses-the-declaring-file-every-time) | Medium | Medium-High |
 |      | **Release 0.11.0**                                                                                                                                        |             |             |
@@ -207,6 +206,7 @@ unlikely to move the needle for most users.
 | P3  | Parallel pre-filter in `find_implementors`                                                                                                                                  | Low-Medium  | Medium-High |
 | P50 | [Cache the top-level scope for `global` keyword resolution](todo/performance.md#p50-cache-the-top-level-scope-for-global-keyword-resolution)                                 | Low-Medium  | High        |
 | P65 | [Every call site repeats the full function lookup, hit or miss](todo/performance.md#p65-every-call-site-repeats-the-full-function-lookup-hit-or-miss) | Low-Medium  | Medium      |
+| P70 | [Diagnostics on a long file find each access's context by scanning](todo/performance.md#p70-diagnostics-on-a-long-file-find-each-accesss-context-by-scanning) | Low-Medium  | Medium      |
 | P58 | [A member-completion cache hit copies the whole item list](todo/performance.md#p58-a-member-completion-cache-hit-copies-the-whole-item-list)                                | Low         | Low         |
 | P66 | [Stub version filtering rescans a stub file once per symbol it declares](todo/performance.md#p66-stub-version-filtering-rescans-a-stub-file-once-per-symbol-it-declares) | Low         | Low-Medium  |
 | P48 | [Higher-order collection proxy injection repeats work](todo/performance.md#p48-higher-order-collection-proxy-injection-repeats-work)                                        | Low         | Medium      |

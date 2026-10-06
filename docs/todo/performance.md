@@ -1197,91 +1197,6 @@ cloning only the items that survive.
 `filter_member_completion_items` in
 `completion/handler/member_access.rs`.
 
-## P64. A file with one very large scope copies it at every branch
-
-**Impact: Medium · Complexity: Medium-High**
-
-`ScopeState::merge_branch` joins two paths by comparing and then unioning
-their whole locals map, and a branch entered from a scope keeps a copy of
-it to merge back. That is proportional to how many variables the enclosing
-scope holds, which is fine inside a method and not fine at the top level of
-a long procedural file, where every statement so far has left its variable
-behind and each `if`/`foreach`/`switch` therefore copies and compares all
-of them. The cost of walking the file grows with the square of its length.
-
-A generated model, N repetitions of `/** @var … */ $vN = []; foreach ($vN
-as $eN) { $zN = $eN->prop; }` at the top level of one file, measured on a
-release build:
-
-| lines | analyse wall clock |
-| ----- | ------------------ |
-| 2,000 | 0.45s              |
-| 4,000 | 1.5s               |
-| 8,000 | 5.8s               |
-| 16,000| 24.8s              |
-
-Each doubling costs roughly four times as much. Sampling the 8,000-line
-run puts about 38% of the diagnostic worker's stacks in
-`merge_branch` and in cloning and dropping the `Ustr → Vec<ResolvedType>`
-map underneath it, ahead of any single resolution step. The same shape
-inside a method body does not show it, because a method's scope is
-bounded by its own body.
-
-The generated model is not far-fetched: a legacy procedural script, a
-generated routing or configuration file, and a long report builder all
-have the same shape, one scope holding thousands of live variables.
-
-A branch reads far fewer variables than the scope holds, so the copy is
-mostly of entries neither path touches. Recording what a branch actually
-wrote and merging only those entries, or sharing the untouched part
-rather than cloning it, would make a merge proportional to the branch
-instead of to the file.
-
-**Where to look:** `merge_branch`, `merge_local` and
-`describes_same_state_as` in
-`type_engine/variable/forward_walk/scope_state/merge.rs`, the proof joins in
-`scope_state/proofs.rs`, and the branch forks: `fork_if_branches` and
-`merge_if_branches` in `forward_walk/if_else.rs` (both `if` spellings go
-through them), the loop bodies in `forward_walk/while_for.rs` and
-`forward_walk/foreach.rs`, and `process_try` / `process_switch` in
-`forward_walk/control_flow.rs`. `scope_state/tests.rs` pins what the join
-does to one variable at a time.
-
-The branch clones are not the only place the walk pays for the size of
-the scope. Measure these too before deciding what the join has to fix:
-
-- `record_scope_snapshot` (`forward_walk/diagnostic_cache.rs`) copies the
-  whole locals map at the start and again at the end of every statement
-  in a diagnostic pass (`walk_body_forward` in `forward_walk/mod.rs`, which
-  also clones a `pre_stmt_scope` per statement). That is
-  O(statements × locals) on its own, the same shape as the branch clones.
-- `ScopeState::snapshot_resolver` clones the map once per call and is
-  called once per condition narrowing (`cond_narrowing/apply.rs`,
-  `cond_narrowing/instanceof.rs`).
-- Condition narrowing turns every local into a `String` per condition
-  (the `var_names` lists in `cond_narrowing/apply.rs`) and runs its
-  extractors per local.
-- `forward_walk/by_ref.rs` re-resolves every local in scope on every call
-  statement to see whether the call rebinds it by reference.
-- The proof joins in `scope_state/proofs.rs` walk every key of one side,
-  `simplify_class_hierarchy_unions` runs after every multi-way join, and
-  `invalidate_dependent_keys` / `invalidate_receiver_state` in
-  `scope_state/mod.rs` `retain` over the whole map on every reassignment
-  or impure call.
-
-Full-scope clones at fork points, for the join rewrite: the then, per
-`elseif`, and `else` copies in `fork_if_branches` plus the implicit-else
-copy in `merge_if_branches`; `pre_loop_scope` and the post-loop join in
-each loop of `while_for.rs` and `foreach.rs`; `loops.rs` once per
-re-walk; `process_try` per `catch` and `process_switch` per arm and at
-the join; `closures.rs` on the first return; `loop_control.rs` per
-`break`/`continue`; `cond_narrowing/apply.rs` per `&&` operand. Narrowing
-writes into branch scopes too, and exit and return edges are recorded at
-arbitrary nesting depth and merged at an outer fork, so a "keys the branch
-wrote" set has to be carried through nested forks.
-
----
-
 ## P65. Every call site repeats the full function lookup, hit or miss
 
 **Impact: Low-Medium · Complexity: Medium**
@@ -1380,3 +1295,38 @@ of itself for each.
 `code_actions/phpstan/fix_return_type/inference.rs`, and
 `function_invokes_callable_arg_immediately` in
 `type_engine/variable/forward_walk/by_ref.rs`.
+
+---
+
+## P70. Diagnostics on a long file find each access's context by scanning
+
+**Impact: Low-Medium · Complexity: Medium**
+
+Several diagnostic collectors work out the context of a member access or
+call by scanning for it, so each access costs time in proportion to the
+length of the file and the whole pass costs its square. The forward walk
+over the same file no longer does: on a generated top-level script of N
+repeated blocks (an `if`/`elseif`/`else`, a `switch`, a `try`, a `while`,
+a closure and a few calls each), N = 4,000 (76,000 lines) takes 13.5s on a
+release build, doubling N roughly quadruples it, and well over half of
+the samples are in these lookups rather than in the walk:
+
+- `class_context_placeholder` (`class_lookup.rs`) calls
+  `text_scan::namespace_at_offset`, which searches the text backwards from
+  the access for a `namespace` keyword. A file without one is searched all
+  the way to its start, once per call from `collect_argument_type_diagnostics`,
+  the deprecated collector and the unknown-member collector (about 30%).
+- `SubjectCacheKey::build` (`diagnostics/subject_cache.rs`) calls
+  `SymbolMap::find_enclosing_scope` and `find_narrowing_block`, which test
+  every scope and every narrowing block in the file, plus
+  `active_var_def_offset` (about 15%).
+- String comparisons inside the unknown-member and deprecated collectors
+  themselves, not yet traced to a single call (about 12%).
+
+The namespace blocks, scopes and narrowing blocks of a file are all known
+once it is parsed, so each lookup can be a binary search over ranges
+recorded at that point.
+
+**Where to look:** `namespace_at_offset` in `text_scan.rs` and its
+callers, `find_enclosing_scope` and `find_narrowing_block` in
+`symbol_map/mod.rs`, and `SubjectCacheKey::build`.

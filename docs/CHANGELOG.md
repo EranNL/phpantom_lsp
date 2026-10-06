@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Faster reference counts and hover in untyped code.** Code lenses, hover and diagnostics are faster in projects where untyped methods call other untyped methods.
 - **Code that calls undefined functions is analyzed much faster.** Files full of calls to missing helpers or functions from uninstalled packages no longer take minutes to analyze.
 - **Files with many diagnostics are reported much faster.** Large files that produce thousands of diagnostics no longer spend most of their time locating each one.
+- **Long scripts are analyzed much faster and in far less memory.** A long file of top-level code, such as a legacy procedural script or a generated configuration file, no longer takes minutes and gigabytes of memory to analyze.
 
 ### Fixed
 

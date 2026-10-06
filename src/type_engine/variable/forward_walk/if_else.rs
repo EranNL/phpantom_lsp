@@ -581,7 +581,7 @@ fn merge_if_branches(
         // Simplify unions where a child class is merged with its
         // parent — e.g. `ClassResolvesBackChild | ClassResolvesBack`
         // collapses to `ClassResolvesBack`.
-        simplify_class_hierarchy_unions(&mut merged, ctx.class_loader);
+        simplify_class_hierarchy_unions(&mut merged, &surviving_scopes[0].locals, ctx.class_loader);
         *scope = merged;
     }
 

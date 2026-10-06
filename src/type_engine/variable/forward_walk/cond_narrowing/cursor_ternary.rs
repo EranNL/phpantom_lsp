@@ -55,7 +55,7 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
             // null/false/truthiness guard (`$x !== null`, `isset($x)`, the
             // bare `$x` check) for any variable currently in scope.
             let has_narrowing = {
-                let var_names: Vec<Atom> = scope.locals.keys().copied().collect();
+                let var_names = scope_keys_named_by(conditional.condition, scope);
                 var_names.iter().any(|vn| {
                     narrowing::try_extract_instanceof(conditional.condition, vn).is_some()
                         || narrowing::try_extract_instanceof_with_negation(
