@@ -535,6 +535,62 @@ pub(crate) fn apply_condition_narrowing_inverse<'b>(
     apply_condition_narrowing_inverse_operand(condition, scope, ctx);
 }
 
+/// Whether a `match (true)` arm failing on `condition` proves the condition
+/// was falsy, so its inverse narrowing can be applied below the arm.
+///
+/// The arm compares with `===`, so it fails on every value except `true`.
+/// That is the same as "falsy" only when `true` is the condition's sole
+/// truthy value: `$count => …` failing says nothing about `$count`, and
+/// treating it as falsy would narrow an `int` to `0` or a `?Foo` to `null`.
+/// `resolve` is only called when the expression's shape does not already
+/// settle the question.
+pub(crate) fn match_true_condition_is_boolean(
+    condition: &Expression<'_>,
+    resolve: impl FnOnce() -> Vec<ResolvedType>,
+) -> bool {
+    match unwrap_parens(condition) {
+        Expression::Binary(bin) if bin.operator.is_instanceof() || bin.operator.is_logical() => {
+            return true;
+        }
+        Expression::UnaryPrefix(prefix)
+            if prefix.operator.is_not()
+                || matches!(
+                    prefix.operator,
+                    UnaryPrefixOperator::BoolCast(..) | UnaryPrefixOperator::BooleanCast(..)
+                ) =>
+        {
+            return true;
+        }
+        Expression::Construct(Construct::Isset(_) | Construct::Empty(_)) => return true,
+        _ => {}
+    }
+    let types = resolve();
+    !types.is_empty()
+        && types.iter().all(|resolved| {
+            resolved
+                .type_string
+                .union_members()
+                .into_iter()
+                .all(|t| t.is_bool() || t.is_true() || t.is_false() || t.is_null())
+        })
+}
+
+/// Narrow `scope` by a failed `match (true)` arm: every one of its
+/// conditions was tested and none was `true`, so each inverse holds at once.
+pub(crate) fn apply_failed_match_arm_narrowing<'b>(
+    expr_arm: &'b MatchExpressionArm<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    for condition in expr_arm.conditions.iter() {
+        if match_true_condition_is_boolean(condition, || {
+            super::super::resolve_rhs_with_scope(condition, scope, ctx)
+        }) {
+            apply_condition_narrowing_inverse(condition, scope, ctx);
+        }
+    }
+}
+
 /// The variable overrides a condition establishes for one polarity, ready to
 /// hand to [`VarResolutionCtx::with_match_arm_narrowing`].
 ///
@@ -594,7 +650,11 @@ pub(crate) fn condition_arm_narrowing<'b>(
         }
     }
     for subject in &subjects {
-        let types = resolver(subject);
+        // An enclosing arm's narrowing is what the subject holds here.
+        let types = match ctx.match_arm_narrowing.get(subject) {
+            Some(narrowed) => narrowed.clone(),
+            None => resolver(subject),
+        };
         if !types.is_empty() {
             scope.set(subject, types);
         }

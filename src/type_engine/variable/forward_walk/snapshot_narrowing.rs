@@ -107,9 +107,7 @@ pub(crate) fn record_match_ternary_snapshots<'b>(
                             apply_condition_narrowing(condition, &mut arm_scope, ctx);
                         }
                         record_branch_snapshots(expr_arm.expression, &arm_scope, ctx);
-                        for condition in expr_arm.conditions.iter() {
-                            apply_condition_narrowing_inverse(condition, &mut failed_scope, ctx);
-                        }
+                        apply_failed_match_arm_narrowing(expr_arm, &mut failed_scope, ctx);
                     }
                     MatchArm::Default(def_arm) => default_expr = Some(def_arm.expression),
                 }

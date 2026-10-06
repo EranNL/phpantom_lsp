@@ -37,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Blade only recognizes the directives your Laravel version has.** A directive newer than the installed Laravel is plain text, the way Blade itself treats it. A `"@context"` key in a JSON-LD block no longer produces a cascade of syntax errors on Laravel versions before 11.
 - **A container binding removed from a service provider stops resolving.** Deleting the last `$this->app->bind(...)` from your providers no longer leaves the old key resolving to its class until restart.
 - **Member actions appear when the selection starts in the indentation.** Getter/setter, property hooks, visibility and other actions on a property or method are now offered with the cursor at column 0, on a whole-line selection, or when the selection begins on the line above.
-- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in `default`. Contributed by @phcorp. Closes #464.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp. Closes #464.
 - **Imports of non-ASCII class names no longer break a file.** An import such as `use App\Models\Øl;` no longer stops the file's diagnostics and code actions.
 - **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
 - **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
@@ -45,6 +45,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A Blade template's first import no longer breaks the view.** When a template's first line opens a block, such as `@if` or a component tag, completing a class adds its `@use` above that line instead of inside the block, where the view would no longer compile. A template that opens with `@php` gets the import as a `use` statement inside that block.
 - **Unused `@use` imports in Blade templates are dimmed.** A `@use` directive that nothing in the template uses is now shown as unused, the way an unused PHP import is, and `phpantom_lsp fix` removes it.
 - **A `@use` group import wrapped over several lines no longer shifts a Blade template.** Hover, diagnostics and go-to-definition no longer land on the wrong line for the rest of a template that wraps a `@use('App\Models\{...}')` list over several lines.
+- **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp.
 
 ## [0.11.0] - 2026-10-05
 

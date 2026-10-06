@@ -73,6 +73,65 @@ reporting the unguarded one (`array{string|null}` passed to
 Found running the php-typing-conformance suite
 (`regressions_array_element_null_subtraction.php`).
 
+### B559. A `match (true)` arm with several conditions is narrowed as if all of them held
+
+**Impact: Medium · Complexity: Low**
+
+```php
+function f(Cat|Dog|null $p): void {
+    match (true) {
+        // Runs when *either* check holds, so `$p` is `Cat|Dog` here,
+        // but no mismatch is reported.
+        $p instanceof Cat, $p instanceof Dog => takesDog($p),
+        default => null,
+    };
+}
+```
+
+The arm body runs when any one of its conditions is `true`, but both the
+diagnostic snapshot walker (`record_match_ternary_snapshots`) and the
+completion/hover walker (`apply_cursor_ternary_narrowing`) apply each
+condition's truthy narrowing to the same scope in turn, which is the
+narrowing of `a && b`. Each condition should narrow its own copy of the
+scope and the copies should be joined, as the `||` pass does.
+
+### B560. An `&&` inside a `match (true)` arm condition does not narrow its later operands
+
+**Impact: Medium · Complexity: Low**
+
+```php
+function f(?string $s): void {
+    match (true) {
+        // `strlen($s)` reports `?string`.
+        is_string($s) && strlen($s) > 1 => null,
+        default => null,
+    };
+}
+```
+
+The same condition narrows its right operand in an `if`, an assignment,
+or a ternary, and an `&&` chain in an arm *body* narrows too. Only the arm
+conditions of a `match (true)` are missing from the short-circuit snapshot
+recording.
+
+### B561. A `match (true)` passed straight into a call ignores its arm narrowing
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+function f(Cat|Dog $p): void {
+    // Reports `Dog|Cat`; assigned to a variable first, the value is `Dog`.
+    takesDog(match (true) { $p instanceof Cat => new Dog(), default => $p });
+}
+```
+
+The `match` value's arm narrowing lives in the `Expression::Match` case of
+`resolve_rhs_expression` (`rhs_resolution/mod.rs`), and none of it reaches
+an argument, not even the `instanceof` extractor that works without a
+scope. The same ternary passed as an argument does narrow, so the argument
+path resolves a `match` through some other route than the ternary's; find
+it and route it through the shared one.
+
 ## Arithmetic
 
 No outstanding items.

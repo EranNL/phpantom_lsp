@@ -48,9 +48,7 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                             apply_cursor_ternary_narrowing(expr_arm.expression, scope, ctx);
                             return;
                         }
-                        for condition in expr_arm.conditions.iter() {
-                            apply_condition_narrowing_inverse(condition, &mut failed_scope, ctx);
-                        }
+                        apply_failed_match_arm_narrowing(expr_arm, &mut failed_scope, ctx);
                     }
                     MatchArm::Default(def_arm) if contains_cursor(def_arm.expression) => {
                         default_expr = Some(def_arm.expression);
