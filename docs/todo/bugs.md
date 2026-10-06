@@ -83,21 +83,6 @@ actually define, the way the alias tables are read from the installed
 framework, with the fixed list as the fallback when no framework is
 installed.
 
-### B545. A `:name="…"` attribute on a plain HTML tag is lowered as PHP
-
-**Impact: Low-Medium · Complexity: Low**
-
-```blade
-<span :class="{'is-empty': !selected?.text}"></span>
-```
-
-Blade only evaluates `:name` attributes on `<x-…>` component tags; on any
-other tag the attribute is client-side (Alpine, Vue) and Blade emits it
-verbatim. `tag::bound_attr` in `blade/preprocessor/tag.rs` fires on
-`html.in_tag` alone, so the JavaScript object literal is parsed as PHP and
-reports a run of syntax errors per attribute. The check needs to require
-that the enclosing tag is a component tag.
-
 ## Templates
 
 No outstanding items.
