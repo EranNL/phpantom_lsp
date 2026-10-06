@@ -37,7 +37,41 @@ No outstanding items.
 
 ## Narrowing
 
-No outstanding items.
+### B555. Comparing an array to an array literal with `===` narrows neither branch
+
+**Impact: Low · Complexity: Medium**
+
+```php
+/** @param list{string} $arr */
+function takesStringList(array $arr): void {}
+
+function caller(?string $val): void
+{
+    $arr = [$val];           // array{string|null}
+    if ($arr === [null]) {
+        return;              // $arr is still array{string|null} here, not array{null}
+    }
+    takesStringList($arr);   // reported, but $arr can only be array{string} here
+}
+```
+
+`literal_comparand_type`
+(`src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs`)
+recognises only the empty array among array literals, so
+`apply_literal_identity_narrowing` (`cond_narrowing/emptiness.rs`) never
+sees `[null]` as a value to pin or strip, and `$arr` keeps its type in both
+branches. Guarding on the element instead (`$arr[0] === null`) narrows
+correctly. The equal branch should narrow the subject to the literal's
+shape (`array{null}`). The unequal branch can subtract the literal from a
+shape with the same keys when every other entry is already pinned to the
+literal's value, which a one-entry shape always is.
+
+The guarded call became a false positive in 0.11.0, which started
+reporting the unguarded one (`array{string|null}` passed to
+`list{string}`). PHPStan and Psalm report it too. mago narrows.
+
+Found running the php-typing-conformance suite
+(`regressions_array_element_null_subtraction.php`).
 
 ## Arithmetic
 
@@ -49,7 +83,48 @@ No outstanding items.
 
 ## Array types
 
-No outstanding items.
+### B553. An unsealed array shape is checked as the plain array it widens to
+
+**Impact: Low-Medium · Complexity: Medium**
+
+```php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+take(['buz' => 42.0]);   // not reported: `foo` is missing
+take(['foo' => 'one']);  // not reported: `foo` is an int
+
+/** @param list{string, int, ...} $values */
+function takeList(array $values): void {}
+
+takeList([1, 'demo', true]); // not reported: the first two entries are the wrong types
+```
+
+`kind()` reads a `TypeKind::UnsealedShape` as the generic array it widens
+to, `non-empty-array<array-key, mixed>` for `array{foo: int, ...}`. The
+shape rules of both type comparisons match on `kind()`: the
+shape-to-shape rule in `is_subtype_of` (`src/php_type/subtype.rs`) and in
+`is_type_compatible` (`src/diagnostics/type_errors/compatibility.rs`), and
+`missing_required_shape_keys`, which names the missing key in the message.
+None of them sees the listed entries, so an unsealed shape on either side
+is held to its widened form alone. As a parameter or `@return` it accepts
+any non-empty array (`[]` is still reported, but without naming `foo`). As
+an argument it reaches a sealed `array{foo: string}` parameter as an array
+of unknown keys, which the shape rules accept as a maybe. The sealed
+spellings are unaffected.
+
+This is a regression: 0.10.0 dropped the `...` and checked the shape as
+sealed, so the missing key was reported.
+
+**Fix:** Read an unsealed side through `as_unsealed_shape()` in those three
+places. Compare its listed entries the way two shapes are compared (a
+required key is present, a key both sides name holds a value that fits),
+then hold every other entry of the narrower side to the tail's key and
+value types. An unsealed `list{…, ...}` also keeps the list rules for its
+positional entries.
+
+Found running the php-typing-conformance suite (`arrays_open_shapes.php`,
+`arrays_unsealed_shape.php`, `arrays_unsealed_shape_optional_key.php`).
 
 ## Laravel
 
@@ -133,3 +208,47 @@ import edit stopped doing this cycle; in a Blade template it lands in the
 virtual prologue, so the completion carrying it is dropped. Plan them
 through `Backend::use_block_for` with the block the cursor is in, as class
 completion does.
+
+### B554. `->value` and `->name` on an enum read as `string`, not as its cases' values
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+enum Suit: string { case Hearts = 'hearts'; case Spades = 'spades'; }
+
+/** @param value-of<Suit> $value */
+function take(string $value): void {}
+
+take($suit->value);  // reported: expects 'hearts'|'spades', got string
+
+final class Card
+{
+    public function __construct(private Suit $suit) {}
+
+    /** @return value-of<Suit> */
+    public function suitValue(): string
+    {
+        return $this->suit->value; // reported: string is incompatible with 'hearts'|'spades'
+    }
+}
+```
+
+The inheritance merge (`src/inheritance/mod.rs`, where it refines a backed
+enum's `value` property) narrows `BackedEnum::$value` from `int|string` to
+the enum's backing type and stops there, and `UnitEnum::$name` stays
+`string`. A named case already reads as its own literal
+(`Suit::Hearts->value` is `'hearts'`), but a value typed as the enum reads
+as the bare scalar. This became a false positive in 0.11.0, when
+`value-of<…>` over an enum started evaluating to the cases' values instead
+of staying unevaluated (which accepted anything): every `value-of<Enum>`
+parameter or return fed an enum's `->value` is now reported. So is a
+declared literal union (`@return 'hearts'|'spades'`), and a `@template T of
+Suit` function returning `$case->value` as `value-of<T>`.
+
+**Fix:** Refine `value` to the union of every case's backing value, and
+`name` to the union of the case names, as PHPStan and Psalm do. When a
+case's value cannot be read (a constant expression the folder does not
+handle), keep the backing type.
+
+Found running the php-typing-conformance suite
+(`phpdoc_advanced_fallback_value_of_template_enum.php`).
