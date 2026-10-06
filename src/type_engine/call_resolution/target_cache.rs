@@ -12,6 +12,7 @@
 /// context instead, so a caller cannot forget to install them.
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::Backend;
 use crate::atom::{Atom, atom};
@@ -269,7 +270,7 @@ pub(crate) fn try_infer_body_return_type(
 
 /// Scan a method body for its return type.
 ///
-/// Delegates to [`Backend::infer_return_type_for_function`], which has
+/// Delegates to [`Backend::infer_return_type_at`], which has
 /// the full resolution infrastructure (use maps, namespace resolution,
 /// function loader, class loader with stubs/class index/PSR-4).
 fn infer_body_return_type(
@@ -306,40 +307,13 @@ fn infer_body_return_type(
         // class could not be located (e.g. only known via the AST).
         .or_else(|| backend.symbols.fqn_uri_index.read().get(class_fqn).cloned())?;
 
-    let content = backend.get_file_content(&file_uri)?;
-
-    // Convert method name_offset to a 0-based line number.  The offset
-    // was recorded against the file as it was parsed, which need not be
-    // the content read back here, so count over the bytes rather than
-    // slicing the string: a `\n` byte never appears inside a multi-byte
-    // character, but an offset landing mid-character would panic a
-    // string slice.
-    let offset = method.name_offset as usize;
-    let bytes = content.as_bytes();
-    if offset >= bytes.len() {
+    let content = backend.get_file_content_arc(&file_uri)?;
+    if method.name_offset as usize >= content.len() {
         return None;
     }
-    let func_line = bytes[..offset].iter().filter(|&&b| b == b'\n').count();
-
-    // Walk backwards from the method name to find the function
-    // keyword line (the declaration may start on an earlier line).
-    // infer_return_type_for_function expects the line of the
-    // `function` keyword.
-    let lines: Vec<&str> = content.lines().collect();
-    let mut decl_line = func_line;
-    for i in (0..=func_line).rev() {
-        let trimmed = lines.get(i).map(|l| l.trim()).unwrap_or("");
-        if trimmed.contains("function ")
-            || trimmed.contains("function(")
-            || trimmed.starts_with("function")
-        {
-            decl_line = i;
-            break;
-        }
-        if trimmed.ends_with('}') || trimmed.ends_with(';') {
-            break;
-        }
-    }
+    // Every resolution while the walk below reads the body parses the
+    // declaring file, so share one parse of it with the rest of the pass.
+    let _parse_guard = crate::parser::with_parse_cache_arc(Arc::clone(&content));
 
     // Publish the call site's argument types against the class the
     // walker will report as its own while it reads this body, so the
@@ -359,7 +333,7 @@ fn infer_body_return_type(
         )
     });
 
-    let result = backend.infer_return_type_for_function(&file_uri, &content, decl_line, true)?;
+    let result = backend.infer_return_type_at(&file_uri, &content, method.name_offset, true)?;
 
     // A declaration the caller can fall back on is only worth replacing
     // with a reading the body actually agrees on. `mixed` is the one

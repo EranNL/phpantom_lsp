@@ -1261,43 +1261,6 @@ set of removed names, turning the filter into set lookups.
 
 ---
 
-## P68. Body return-type inference re-parses the declaring file every time
-
-**Impact: Medium · Complexity: Medium-High**
-
-`infer_return_type_for_function` reads the declaring file's text and
-parses it from scratch through `with_parsed_program` for every body it
-infers, and `infer_body_return_type` additionally splits the whole file
-into lines twice to locate the declaration. The cost is proportional to
-the size of the declaring file rather than the method. A 23,000-line
-`_ide_helper.php` (now excluded by default) made every inference of one
-of its facade methods cost a full parse of the file, and memo misses
-across call sites multiplied that into minutes. Any large hand-written
-or generated class with untyped methods has the same shape.
-
-Caching the parsed program per file for the duration of a pass (or
-inferring from an AST the caller already holds when the method lives in
-the file being walked), and locating the body by `name_offset` instead
-of by scanning lines, would make each inference cost the size of the
-method body.
-
-The forward walker has the same shape closer to home:
-`function_invokes_callable_arg_immediately` re-parses the very file
-being walked to find out whether a function declared in it is tagged
-`@param-later-invoked-callable`, once per closure argument passed to a
-function call. It no longer runs for arguments that are not closures,
-but a template or script that passes many closures pays one full parse
-of itself for each.
-
-**Where to look:** `infer_body_return_type` in
-`type_engine/call_resolution/target_cache.rs`,
-`infer_return_type_for_function` in
-`code_actions/phpstan/fix_return_type/inference.rs`, and
-`function_invokes_callable_arg_immediately` in
-`type_engine/variable/forward_walk/by_ref.rs`.
-
----
-
 ## P70. Diagnostics on a long file find each access's context by scanning
 
 **Impact: Low-Medium · Complexity: Medium**
