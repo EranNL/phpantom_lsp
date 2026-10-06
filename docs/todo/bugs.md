@@ -45,22 +45,7 @@ No outstanding items.
 
 ## Symbol resolution
 
-### B547. A function a watched file adds can stay "not found" until the next change
-
-**Impact: Low · Complexity: Medium**
-
-`reindex_files_batch` (`src/lib.rs`) clears `function_not_found_cache`
-before it adds the batch's functions to `autoload_function_index`. A
-lookup running on another thread (a diagnostic pass, a hover) that read the
-index before the insert and records its miss after the clear writes a miss
-for a function the batch just declared. `find_or_load_function`
-(`src/resolution.rs`) re-checks only `global_functions` under the cache's
-write lock, which a byte-scanned file never reaches, and every later lookup
-stops at the negative cache before the index check, so the call is
-reported as an undefined function until the next watched-file change or a
-re-parse of the declaring file. Clear the cache after the index inserts,
-and record a miss only when no index write happened since the lookup
-started (a generation counter compared under the cache's write lock).
+No outstanding items.
 
 ## Array types
 

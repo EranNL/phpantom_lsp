@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A function added by a watched file is found right away.** A function declared in a file created or changed on disk no longer keeps being reported as undefined while a diagnostic pass or hover is running.
 - **Global Laravel translation paths are recognised.** Translations registered with `loadTranslationsFrom($path)` now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly `null`. Analysis also finds translation files when `--project-root` is a relative path. Contributed by @shuvroroy.
 - **Alpine and Vue `:attr` bindings in Blade.** A `:name="…"` attribute on a plain HTML tag is no longer parsed as PHP, so it stops producing syntax errors. Only `<x-…>` component tags evaluate bound attributes.
 - **laravel-ide-helper files are skipped.** `_ide_helper.php` and `_ide_helper_models.php` are no longer indexed, since PHPantom resolves facades and models natively and their stand-in classes only competed with the real ones. List them with a leading `!` in `[indexing] exclude` to index them anyway.
