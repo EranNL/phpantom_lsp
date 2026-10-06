@@ -89,25 +89,4 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B546. `analyze` re-runs the Blade refresh on a diagnostic worker while other workers diagnose templates
-
-**Impact: Low-Medium · Complexity: Medium**
-
-`analyse::stages::index_project` parses the user files and runs
-`refresh_blade_injected_vars` itself, but never publishes
-`workspace_indexed`. The first diagnostic that asks for every user file's
-symbol map (`enumerate_all_routes` through `user_file_symbol_maps`) then
-runs the editor's `ensure_workspace_indexed` from inside a diagnostic
-worker: it walks the workspace, indexes the resource files, and refreshes
-every template a second time, re-parsing the ones whose inferred variables
-changed, while the other workers are diagnosing those same templates. Which
-state a template is checked against depends on timing. On one Laravel 8
-project the CLI reports 16 fewer diagnostics than a run where the refresh
-happens once, after the resource indexing, which is what the editor sees.
-
-Calling `ensure_workspace_index_ready_with_progress` from `index_project` in
-place of the bare refresh makes the run deterministic and costs nothing on a
-full run, but a run limited to a few paths then parses the whole workspace
-(about 0.1s and 70-80 MB more on a single file). The fix should index only
-what the selected files' diagnostics need, or settle the index before the
-diagnostic pass starts in a way a path-limited run can afford.
+No outstanding items.

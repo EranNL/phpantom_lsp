@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **PHP_CodeSniffer only runs on projects that use it.** A `vendor/bin/phpcs` installed by some other package no longer produces coding-standard warnings. PHPCS diagnostics now need `squizlabs/php_codesniffer` in `require-dev`, a PHPCS ruleset file, or a `[phpcs] standard` in `.phpantom.toml`.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp.
 - **Import edits and unused-import hints respect each `namespace` block.** In a file with several `namespace` blocks, an import in one block no longer hides the "Import class" action in another, and an import only another block uses is now dimmed as unused. New imports from code actions, completion, PHPStan quick-fixes and class moves go into the block that needs them, and renaming or moving a class updates each block's own import.
+- **`analyze` reports the same Blade diagnostics on every run.** In Laravel projects, the diagnostics reported for Blade templates no longer vary between runs, and they now match what the editor shows.
 
 ## [0.11.0] - 2026-10-05
 
