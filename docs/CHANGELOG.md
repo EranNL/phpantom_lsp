@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [0.11.1] - 2026-10-07
+
+### Added
+
 - **Laravel translations are understood across locales.** JSON and PHP language files under `lang/` and `resources/lang/` share navigation, locale and replacement-key completion, and hover with links to each locale's value. Missing keys offer an insertion quick fix when their PHP group file already exists. Contributed by @shuvroroy.
 - **Code that cannot be reached is dimmed.** Statements after a `return`, `throw`, `exit`, `continue`, `break`, or an `if` whose every branch leaves the block are greyed out the way an unused import is. Contributed by @petrovo-as.
 
@@ -1724,7 +1732,8 @@ Initial release.
 - **Embedded phpstorm-stubs.**
 - **Zed editor extension.**
 
-[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...HEAD
+[Unreleased]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.1...HEAD
+[0.11.1]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.11.0...0.11.1
 [0.11.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.10.0...0.11.0
 [0.10.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.9.0...0.10.0
 [0.9.0]: https://github.com/PHPantom-dev/phpantom_lsp/compare/0.8.0...0.9.0
