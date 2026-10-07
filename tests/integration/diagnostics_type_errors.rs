@@ -10342,6 +10342,278 @@ takesConfig(['host' => 'localhost', ...['port' => 3306]]);
     assert!(messages.is_empty(), "got {messages:?}");
 }
 
+// ─── Unsealed array shapes ──────────────────────────────────────────────────
+
+/// `array{foo: int, ...}` lists `foo`, so an array literal that does not
+/// have it is short of a required key, the same as for the sealed spelling.
+#[test]
+fn array_literal_missing_a_key_an_unsealed_shape_lists_is_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+take(['buz' => 42.0]);
+take([]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("missing required key 'foo'")),
+        "got {messages:?}"
+    );
+}
+
+#[test]
+fn array_literal_with_the_wrong_value_for_a_key_an_unsealed_shape_lists_is_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+take(['foo' => 'one']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        !messages[0].contains("missing required"),
+        "the key is there, only its value is wrong: {messages:?}"
+    );
+}
+
+/// What an unsealed shape does not list is exactly what its `...` is for,
+/// and an optional key is not required in the first place.
+#[test]
+fn array_literal_satisfying_an_unsealed_shape_is_not_reported() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+/** @param array{foo?: int, ...} $shape */
+function takeOptional(array $shape): void {}
+
+take(['foo' => 1]);
+take(['foo' => 1, 'bar' => 'anything', 7 => null]);
+takeOptional([]);
+takeOptional(['bar' => 1]);
+takeOptional(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The positional entries of an unsealed `list{…, ...}` are held to their
+/// types like any other listed entry.
+#[test]
+fn array_literal_with_the_wrong_values_for_an_unsealed_list_is_reported() {
+    let php = r#"<?php
+/** @param list{string, int, ...} $values */
+function takeList(array $values): void {}
+
+takeList([1, 'demo', true]);
+takeList(['a', 2, true]);
+takeList(['a', 2]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'demo'"), "got {messages:?}");
+}
+
+/// A literal that does not even start the list is short of the entries the
+/// list shape names, and its `...` does not make up for them.
+#[test]
+fn array_literal_missing_the_entries_an_unsealed_list_lists_is_reported() {
+    let php = r#"<?php
+/** @param list{string, ...} $values */
+function takeList(array $values): void {}
+
+takeList([]);
+takeList(['name' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("missing required key '0'"),
+        "got {messages:?}"
+    );
+}
+
+/// The entries an unsealed shape does not list have to be the kind its
+/// `...<K, V>` names. They are never coerced to fit, though the file is not
+/// `strict_types`, since PHP hands the array over as it is.
+#[test]
+fn entries_an_unsealed_shape_does_not_list_have_to_fit_its_tail() {
+    let php = r#"<?php
+/** @param array{foo: int, ...<string, string>} $shape */
+function takeTail(array $shape): void {}
+
+takeTail(['foo' => 1, 'bar' => 'x']);
+takeTail(['foo' => 1, 'bar' => 2]);
+takeTail(['foo' => 1, 5 => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(messages[0].contains("bar: 2"), "got {messages:?}");
+    assert!(messages[1].contains("5: 'x'"), "got {messages:?}");
+}
+
+#[test]
+fn an_unsealed_list_takes_further_entries_of_its_tail_type() {
+    let php = r#"<?php
+/** @param list{string, ...<string>} $names */
+function takeNames(array $names): void {}
+
+takeNames(['a']);
+takeNames(['a', 'b', 'c']);
+takeNames(['a', 3]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("'a', 3"), "got {messages:?}");
+}
+
+/// A shape inferred from a variable lists the keys we saw assigned, which
+/// is a lower bound on what the value has, so only a literal is proof that
+/// a listed key is absent.
+#[test]
+fn a_shape_that_did_not_come_from_a_literal_stays_silent_against_an_unsealed_shape() {
+    let php = r#"<?php
+/** @param array{foo: int, ...} $shape */
+function take(array $shape): void {}
+
+function build(bool $withFoo): void {
+    $config = ['bar' => 'x'];
+    if ($withFoo) {
+        $config['foo'] = 1;
+    }
+    take($config);
+}
+
+$partial = ['bar' => 'x'];
+take($partial);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// A function that returns `array{foo: int, ...}` hands over an array whose
+/// `foo` is an `int`, which a parameter that lists `foo` otherwise has to
+/// agree with, whichever of the two is sealed.
+#[test]
+fn an_unsealed_argument_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array{foo: array<string>} $shape */
+function takeSealed(array $shape): void {}
+
+/** @param array{foo: array<string>, ...} $shape */
+function takeOpen(array $shape): void {}
+
+/** @param array{foo: int, ...} $shape */
+function takeMatching(array $shape): void {}
+
+takeSealed(makeOpen());
+takeOpen(makeOpen());
+takeMatching(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("expects array{foo: array<string>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("expects array{foo: array<string>, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// What an unsealed argument holds beyond the entries it lists has to fit
+/// the tail of an unsealed parameter, and a tail that says nothing about
+/// its entries does not contradict one that does.
+#[test]
+fn the_tail_of_an_unsealed_argument_is_held_to_the_tail_of_an_unsealed_parameter() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, int>} */
+function makeInts(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array{foo: int, ...<string, string>} $shape */
+function takeStrings(array $shape): void {}
+
+/** @param array{foo: int, ...<string, int>} $shape */
+function takeInts(array $shape): void {}
+
+takeStrings(makeInts());
+takeStrings(makeOpen());
+takeInts(makeInts());
+takeInts(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{foo: int, ...<string, int>}"),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed shape is an array, so an object that merely behaves like
+/// one is not accepted for it, the same as for the sealed spelling and
+/// unlike a bare `array`.
+#[test]
+fn an_array_access_object_is_not_an_unsealed_shape() {
+    let php = r#"<?php
+class Bag implements \ArrayAccess
+{
+    public function offsetExists(mixed $offset): bool { return true; }
+    public function offsetGet(mixed $offset): mixed { return null; }
+    public function offsetSet(mixed $offset, mixed $value): void {}
+    public function offsetUnset(mixed $offset): void {}
+}
+
+/** @param array{foo: int, ...} $shape */
+function takeOpen(array $shape): void {}
+
+/** @param array{foo: int} $shape */
+function takeSealed(array $shape): void {}
+
+function takeAny(array $any): void {}
+
+takeOpen(new Bag());
+takeSealed(new Bag());
+takeAny(new Bag());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.ends_with("got Bag") && m.contains("array{foo: int")),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed shape may be one member of a union, which is judged member
+/// by member like any other.
+#[test]
+fn an_unsealed_shape_inside_a_union_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @param array{foo: int, ...}|null $maybe */
+function take(?array $maybe): void {}
+
+take(null);
+take(['foo' => 1, 'bar' => true]);
+take(['foo' => 'x']);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("foo: 'x'"), "got {messages:?}");
+}
+
 // ─── List order ─────────────────────────────────────────────────────────────
 
 /// `array_is_list()` is `false` for a literal whose keys are written out

@@ -156,48 +156,50 @@ No outstanding items.
 
 ## Array types
 
-### B553. An unsealed array shape is checked as the plain array it widens to
+### B564. Two comparisons still read an unsealed array shape as the plain array it widens to
 
-**Impact: Low-Medium · Complexity: Medium**
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-/** @param array{foo: int, ...} $shape */
-function take(array $shape): void {}
+/** @return array{foo: string, ...} */
+function makeOpen(): array { return ['foo' => 'x']; }
 
-take(['buz' => 42.0]);   // not reported: `foo` is missing
-take(['foo' => 'one']);  // not reported: `foo` is an int
+/** @param array<string, int> $map */
+function takeMap(array $map): void {}
 
-/** @param list{string, int, ...} $values */
-function takeList(array $values): void {}
-
-takeList([1, 'demo', true]); // not reported: the first two entries are the wrong types
+takeMap(makeOpen());     // not reported: `foo` is a string
+takeMap(['foo' => 'x']); // reported
 ```
 
 `kind()` reads a `TypeKind::UnsealedShape` as the generic array it widens
-to, `non-empty-array<array-key, mixed>` for `array{foo: int, ...}`. The
-shape rules of both type comparisons match on `kind()`: the
-shape-to-shape rule in `is_subtype_of` (`src/php_type/subtype.rs`) and in
-`is_type_compatible` (`src/diagnostics/type_errors/compatibility.rs`), and
-`missing_required_shape_keys`, which names the missing key in the message.
-None of them sees the listed entries, so an unsealed shape on either side
-is held to its widened form alone. As a parameter or `@return` it accepts
-any non-empty array (`[]` is still reported, but without naming `foo`). As
-an argument it reaches a sealed `array{foo: string}` parameter as an array
-of unknown keys, which the shape rules accept as a maybe. The sealed
-spellings are unaffected.
+to, so a comparison that matches on `kind()` never sees the entries the
+shape lists. The shape-to-shape rules in `is_subtype_of`,
+`is_type_compatible` and `missing_required_shape_keys` read it through
+`shape_parts()` now. Two more places still do not:
 
-This is a regression: 0.10.0 dropped the `...` and checked the shape as
-sealed, so the missing key was reported.
+- The `ArrayShape → typed array` rule in `is_type_compatible`
+  (`src/diagnostics/type_errors/compatibility.rs`) matches
+  `TypeKind::ArrayShape`, so an unsealed argument skips it and reaches a
+  typed array parameter as the `non-empty-array<array-key, mixed>` it
+  widens to, where the `mixed` tail swallows the listed entries. A sealed
+  literal is held to its entries by that rule, which is why the last line
+  above is reported.
+- `is_subtype_of_typed` (`src/class_lookup.rs`) falls back to its
+  generic-array rules when the structural check says no, and compares two
+  unsealed shapes as the arrays they widen to: `array{foo: int, ...}` is a
+  subtype of `array{foo: string, ...}`, which parameter seeding reads as
+  a proven narrowing of the declared type.
 
-**Fix:** Read an unsealed side through `as_unsealed_shape()` in those three
-places. Compare its listed entries the way two shapes are compared (a
-required key is present, a key both sides name holds a value that fits),
-then hold every other entry of the narrower side to the tail's key and
-value types. An unsealed `list{…, ...}` also keeps the list rules for its
-positional entries.
-
-Found running the php-typing-conformance suite (`arrays_open_shapes.php`,
-`arrays_unsealed_shape.php`, `arrays_unsealed_shape_optional_key.php`).
+**Fix:** Read the argument through `shape_parts()` in the `ArrayShape →
+typed array` rule. Hold its listed entries to the parameter's key and
+value types as for a sealed shape, and its tail to them as for the type
+arguments of an array. The rule has to move above the same-base generic
+rule, which answers first for an unsealed argument. In
+`is_subtype_of_typed`, settle a pair of shapes, either of them unsealed,
+by the entries they list before the generic-array rules. Sharing
+`shape_is_subshape` with a class-aware element comparison would let it
+follow the class hierarchy into the entries, which it does not for sealed
+shapes either.
 
 ## Laravel
 

@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Unused `@use` imports in Blade templates are dimmed.** A `@use` directive that nothing in the template uses is now shown as unused, the way an unused PHP import is, and `phpantom_lsp fix` removes it.
 - **A `@use` group import wrapped over several lines no longer shifts a Blade template.** Hover, diagnostics and go-to-definition no longer land on the wrong line for the rest of a template that wraps a `@use('App\Models\{...}')` list over several lines.
 - **A `match (true)` arm knows the arms above it did not match.** `match (true) { $name === null => 'none', default => strtoupper($name) }` no longer reports `$name` as possibly `null` in the `default` arm. Hover, completion, and the value of the `match` see the same narrowing, wherever `default` is written. Contributed by @phcorp.
+- **An unsealed array shape is held to the entries it lists.** A parameter or return type such as `array{foo: int, ...}` or `list{string, int, ...}` no longer accepts any non-empty array: an argument that leaves out `foo` or gives an entry the wrong type is reported, and so is an extra entry that does not fit the `...<K, V>` tail.
 
 ## [0.11.0] - 2026-10-05
 

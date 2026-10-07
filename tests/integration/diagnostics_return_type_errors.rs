@@ -2326,6 +2326,46 @@ function get_user(): array {
     );
 }
 
+/// An unsealed `@return array{foo: int, ...}` lists `foo`, so what comes
+/// back is held to it however many other entries it also has.
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_the_entries_it_lists() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'anything'];
+}
+
+/** @return array{foo: int, ...} */
+function wrongValue(): array {
+    return ['foo' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("foo: array{}"), "got {messages:?}");
+}
+
+#[test]
+fn array_returned_from_an_unsealed_shape_return_is_held_to_its_tail() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, string>} */
+function ok(): array {
+    return ['foo' => 1, 'bar' => 'x'];
+}
+
+/** @return array{foo: int, ...<string, string>} */
+function wrongTail(): array {
+    return ['foo' => 1, 'bar' => []];
+}
+"#;
+    let diags = collect(php);
+    let messages = messages_with_code(&diags, "type_mismatch_return");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(messages[0].contains("bar: array{}"), "got {messages:?}");
+}
+
 #[test]
 fn no_diagnostic_for_foreach_key_value_rewriting_every_element() {
     let php = r#"<?php
