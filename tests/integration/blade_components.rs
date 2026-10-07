@@ -5,8 +5,8 @@
 mod tests {
     use crate::common::{
         BLADE_COMPONENT_COMPOSER, ILLUMINATE_COMPONENT_STUB, LIVEWIRE_COMPONENT_STUB,
-        complete_labels_at_opened_with_trigger, create_psr4_workspace, markup_hover_at,
-        open_document, template_diagnostics, workspace_path, workspace_uri,
+        complete_labels_at_opened_with_trigger, create_psr4_workspace, hover_text_at,
+        markup_hover_at, open_document, template_diagnostics, workspace_path, workspace_uri,
     };
     use tower_lsp::lsp_types::*;
 
@@ -143,6 +143,35 @@ mod tests {
             hover.contains("$kind"),
             "hovering the bound expression should describe it: {hover}"
         );
+    }
+
+    /// The tag's name lowers to generated PHP of its own, and whatever the
+    /// tag emits next (a bound attribute's call or assignment) starts right
+    /// behind it, so hovering the name must not describe any of that.
+    #[tokio::test]
+    async fn hovering_a_tag_name_does_not_describe_the_php_generated_for_it() {
+        for template in [
+            // No index knows the tag, so its first bound attribute becomes a
+            // `blade_bound_attr_directive(` call.
+            "<x-panel :author=\"$author\" heading=\"Latest\">\n",
+            // A class-backed tag whose first bound attribute is an argument,
+            // bound to a variable of the preprocessor's own.
+            "<x-alert :type=\"$kind\">\n",
+            // A class-backed tag whose first attribute is plain.
+            "<x-alert type=\"danger\">\n",
+        ] {
+            let (backend, _dir, uri) = workspace(template);
+            open_document(&backend, &uri, "blade", template).await;
+
+            let name_len = template.find(' ').expect("the tag has attributes");
+            for column in 0..name_len {
+                let hover = hover_text_at(&backend, &uri, 0, column as u32).await;
+                assert_eq!(
+                    hover, None,
+                    "column {column} of {template:?} is the tag's name, which has nothing to hover"
+                );
+            }
+        }
     }
 
     /// The deliverable: `$component->` after a component tag completes

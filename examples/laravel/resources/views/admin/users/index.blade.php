@@ -28,7 +28,7 @@
             <tr>
                 <th>Name</th>
                 <th>Email</th>
-                <th>Role</th>
+                <th>Badge</th>
             </tr>
         </thead>
         <tbody>
@@ -42,7 +42,7 @@
                          for hover/go-to-definition. The same `:attr` on a
                          plain HTML tag stays text, because Alpine and Vue
                          bind with that syntax too. --}}
-                    <td><x-widgets::badge :label="$rowLabel" :author="$user" /></td>
+                    <td><x-widgets::badge label="Author" :author="$user" :title="$rowLabel" /></td>
                 </tr>
             @endforeach
         </tbody>

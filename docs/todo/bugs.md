@@ -168,23 +168,33 @@ the merged files are.
 
 ## Blade
 
-### B567. The Laravel example's `analyze` run reports a fourth error
+### B569. Hovering a raw echo's opener written without a space shows the expression behind it
 
 **Impact: Low · Complexity: Low**
 
-`phpantom_lsp analyze --project-root examples/laravel` is documented in
-`docs/CONTRIBUTING.md` to report exactly the three deliberate mistakes in
-`app/Demo.php`. It also reports `Unused variable '$rowLabel'` at
-`resources/views/admin/users/index.blade.php:36`. The template assigns
-`$rowLabel` in `@php` and reads it only in a `:data-label` binding on a
-plain `<tr>`, which Blade no longer analyses as PHP now that only `<x-…>`
-component tags evaluate bound attributes, so the variable is unused as far
-as the engine can tell. The comment above the line still says the
-expression is real PHP.
+```blade
+{!!$html!!}
+```
 
-**Fix:** Make the demo say what it means: put the bound attributes on a
-component tag the example project defines, or read `$rowLabel` where Blade
-does evaluate it. Then the run is back to three errors.
+Hovering the `{!!` shows the hover of `$html`. `{!! $html !!}` shows nothing
+there, and the `{{` of `{{$html}}` shows `e()`.
+
+`{!!` becomes ` echo `, and `BladeSourceMap::blade_to_php` maps the opener's
+columns to where that replacement ends. With the usual space the PHP there is
+whitespace, but without it the replacement ends on the first column of the
+expression, so the map cannot tell the generated `echo` from the template's
+own text. The `{{` case never reaches the map: `blade_echo_delimiter_hover`
+(`src/blade/echo_delimiter.rs`) answers it first and has nothing for `{!!` or
+`!!}`, although the comment above the hover handler in `src/server.rs` says
+it covers `{!!`.
+
+**Fix:** Answer the raw-echo delimiters in `blade_echo_delimiter_hover` and
+`blade_echo_delimiter_definition` the way `{{` is answered, so the opener
+describes itself instead of falling through to the map. Mapping a column
+inside any opener to a column of its replacement would cover every opener at
+once, but it moves what `analyze_template_use_block`
+(`src/blade/use_block.rs`) reads from the start of a line, so check that
+first.
 
 ## Templates
 

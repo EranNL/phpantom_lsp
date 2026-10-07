@@ -56,6 +56,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comparing an array to an array literal narrows it.** After `if ($arr === [null]) { return; }`, an `array{?string}` is known to hold a `string`, so passing it where a `list{string}` is expected is no longer reported. Inside the `if`, the array is the literal's `array{null}`.
 - **`match` arms narrow the way the equivalent `if` does.** An arm with several conditions sees what any one of them proves, not what all of them would together. An `&&` in a `match (true)` arm condition narrows the operands after it, and a `match` passed straight into a call narrows its arms the same as one assigned to a variable first.
 - **A ternary or `match` to the right of `&&` or `||` knows what the left side proved.** `$x !== null && ($x->ready ? process($x) : null)` no longer reports `$x` as possibly `null` inside the ternary.
+- **Hovering a Blade component tag's name or a directive's keyword shows nothing unrelated.** On `<x-panel :author="$post->author">` or `@if($cond)`, hovering the tag name or `@if` no longer describes code the template never wrote or the expression after it.
 
 ## [0.11.0] - 2026-10-05
 

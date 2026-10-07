@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::common::create_test_backend;
+    use crate::common::{create_test_backend, hover_text_at, open_document};
     use tower_lsp::LanguageServer;
     use tower_lsp::lsp_types::*;
 
@@ -209,5 +209,31 @@ mod tests {
             "@inject should emit an app() assignment: {}",
             virtual_php
         );
+    }
+
+    /// A directive's keyword is replaced by generated PHP, and the
+    /// expression it takes starts right behind that, so hovering the keyword
+    /// must not describe the expression.
+    #[tokio::test]
+    async fn hovering_a_directive_keyword_does_not_describe_the_expression_behind_it() {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///directive-hover.blade.php").unwrap();
+        let template = "@php($cond = true)\n\
+                        @if($cond)\n\
+                        @foreach([$cond] as $row)\n\
+                        @include('partials.card', ['on' => $cond])\n\
+                        @endforeach\n\
+                        @endif\n";
+        open_document(&backend, &uri, "blade", template).await;
+
+        for (line, keyword) in [(1, "@if"), (2, "@foreach"), (3, "@include")] {
+            for column in 0..keyword.len() {
+                let hover = hover_text_at(&backend, &uri, line, column as u32).await;
+                assert_eq!(
+                    hover, None,
+                    "column {column} of {keyword} on line {line} is the keyword, which has nothing to hover"
+                );
+            }
+        }
     }
 }
