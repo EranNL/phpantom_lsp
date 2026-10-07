@@ -39,6 +39,51 @@ pub(super) fn class_declaration_span<'a>(
     })
 }
 
+/// The first declaration `section` holds besides the class named
+/// `class_short_name`, written the way a refusal names it.
+///
+/// A section gives every class-like, function, and `const` it declares the
+/// same namespace, so a move that changes the namespace for the class
+/// changes it for all of them. A class declared again under its own name,
+/// once per branch of a conditional, is the same class and moves with it.
+pub(super) fn section_neighbour(
+    symbol_map: &SymbolMap,
+    content: &str,
+    section: &NamespaceSpan,
+    class_short_name: &str,
+) -> Option<String> {
+    symbol_map
+        .spans
+        .iter()
+        .filter(|span| section.start <= span.start && span.end <= section.end)
+        .find_map(|span| match &span.kind {
+            SymbolKind::ClassDeclaration { name }
+                if !name.eq_ignore_ascii_case(class_short_name) =>
+            {
+                Some(format!("`{name}`"))
+            }
+            SymbolKind::FunctionCall {
+                name,
+                is_definition: true,
+                ..
+            } => Some(format!("`{name}()`")),
+            // `define('NAME', …)` spells the whole name of its constant in a
+            // string, so no `namespace` gives it that name. Its span ends at
+            // the closing quote, which the name of a `const` never touches.
+            SymbolKind::ConstantReference {
+                name,
+                is_definition: true,
+            } if !matches!(
+                content.as_bytes().get(span.end as usize),
+                Some(b'\'' | b'"')
+            ) =>
+            {
+                Some(format!("`{name}`"))
+            }
+            _ => None,
+        })
+}
+
 /// What the source around a `namespace` name turns out to be, once the
 /// move needs to take the whole declaration away rather than rewrite
 /// the name in place.

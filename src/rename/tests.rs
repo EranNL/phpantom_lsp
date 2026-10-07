@@ -323,6 +323,33 @@ async fn rename_class_move_into_global_namespace_refuses_unbraced_namespace_sect
 }
 
 #[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_a_shared_section() {
+    // Dropping the `namespace` statement would put `Baz` in the global
+    // namespace along with the class.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Widget.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace App\\Old;\n",
+        "\n",
+        "class Widget {}\n",
+        "\n",
+        "class Baz {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    let error = backend
+        .plan_class_move("App\\Old\\Widget", "Widget")
+        .expect_err("a class sharing its section cannot leave the namespace alone");
+    assert!(
+        error.contains("`Baz`") && error.contains("in the global namespace too"),
+        "The refusal should name the neighbour and where it would end up; got: {error}"
+    );
+}
+
+#[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
     let class_uri = Url::parse("file:///Widget.php").unwrap();

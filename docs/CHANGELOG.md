@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Moving a class is refused when other declarations share its `namespace`.** In the editor or with `phpantom_lsp move`, a class that sits beside other classes, functions, or constants under one `namespace` is no longer moved on its own, which put those in the new namespace while every reference to them kept the old one.
 - **Moving a class into the global namespace is refused in a file with several `namespace` statements.** In the editor or with `phpantom_lsp move`, the move no longer deletes the class's `namespace` line, which left the class in another namespace or the file invalid.
 - **Moving a class imports what its own `namespace` block used.** In a file with several `namespace` blocks, moving a class, in the editor or with `phpantom_lsp move`, now imports the names its block reached through the old namespace, and no longer imports names another block wrote.
 - **Moving a class changes the right `namespace` block.** When several `namespace` blocks in one file each declare a class with the same short name, moving one of them, in the editor or with `phpantom_lsp move`, no longer rewrites another block's `namespace`.

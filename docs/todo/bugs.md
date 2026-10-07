@@ -328,25 +328,3 @@ puts the first import of a block that has none on the line after its
 line, and every import planned through it shares the placement. The import
 belongs just after the `{` or `;` of the declaration, which `UseBlockInfo`
 cannot express: its positions are whole lines.
-
-### B563. Moving a class that shares its `namespace` section with other declarations changes their namespace too
-
-**Impact: Low-Medium · Complexity: Medium**
-
-```php
-<?php
-namespace A;
-
-class Foo {}
-
-class Baz {}
-```
-
-Moving `A\Foo` to `C\Foo` rewrites `namespace A;` to `namespace C;`, which makes
-`Baz` a `C\Baz` while every reference to `A\Baz` is left alone, and the file
-moves to the new PSR-4 path with it. Moving `A\Foo` to `Foo` removes the
-statement and makes `Baz` global the same way. `namespace_declaration_edits`
-(`src/rename/class/mod.rs`) rewrites or removes the statement of the section
-that declares the class without asking what else the section declares. Refuse
-the move when the section holds any other class-like, function, or constant,
-the way a brace-style `namespace` is refused.

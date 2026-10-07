@@ -2,7 +2,7 @@
 
 use crate::common::{
     apply_edits, create_test_backend, doc_change_edits_for_uri, edits_for_uri, extract_rename_file,
-    initialize_with_resource_operations, open_php, prepare_rename, rename,
+    initialize_with_resource_operations, open_php, prepare_rename, rename, rename_result,
 };
 use tower_lsp::lsp_types::*;
 
@@ -1575,6 +1575,201 @@ async fn class_move_imports_the_siblings_of_the_unbraced_section_that_declares_t
             "class Foo\n",
             "{\n",
             "    public function f(): Helper {}\n",
+            "}\n",
+        )
+    );
+}
+
+// ─── A section shared with other declarations ───────────────────────────────
+
+/// Open `text`, move the `Foo` named on `line` to `C\Foo`, and return the
+/// message the move is refused with.
+async fn refusal_moving_foo(text: &str, line: u32) -> String {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+
+    open_php(&backend, &uri, text).await;
+
+    let character = text
+        .lines()
+        .nth(line as usize)
+        .and_then(|source| source.find("Foo"))
+        .expect("the line names `Foo`") as u32;
+    rename_result(&backend, &uri, line, character, "C\\Foo")
+        .await
+        .expect_err("the move should be refused")
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_its_section_declares_another_class() {
+    // The `namespace` statement would be rewritten for `Baz` as well, and
+    // every reference to `A\Baz` would be left naming a class that is gone.
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "class Baz {}\n",
+    );
+
+    let message = refusal_moving_foo(text, 3).await;
+
+    assert!(
+        message.contains("`A\\Foo` to `C\\Foo`")
+            && message.contains("`Baz`")
+            && message.contains("in `C` too"),
+        "the refusal should name the class in the way and where it would end up: {message}"
+    );
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_its_section_declares_another_class_like() {
+    for kind in ["interface", "trait", "enum"] {
+        let text = format!("<?php\nnamespace A;\n\nclass Foo {{}}\n\n{kind} Baz {{}}\n");
+
+        let message = refusal_moving_foo(&text, 3).await;
+
+        assert!(
+            message.contains("`Baz`"),
+            "a neighbouring {kind} should be named in the refusal: {message}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_its_section_declares_a_function() {
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "function helper(): void {}\n",
+    );
+
+    let message = refusal_moving_foo(text, 3).await;
+
+    assert!(
+        message.contains("`helper()`"),
+        "the function should be named in the refusal: {message}"
+    );
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_its_section_declares_a_constant() {
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "const LIMIT = 1;\n",
+    );
+
+    let message = refusal_moving_foo(text, 3).await;
+
+    assert!(
+        message.contains("`LIMIT`"),
+        "the constant should be named in the refusal: {message}"
+    );
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_a_braced_section_declares_another_class() {
+    let text = concat!("<?php\n", "namespace A { class Foo {} class Baz {} }\n");
+
+    let message = refusal_moving_foo(text, 1).await;
+
+    assert!(
+        message.contains("`Baz`"),
+        "the neighbour should be named in the refusal: {message}"
+    );
+}
+
+#[tokio::test]
+async fn class_move_is_refused_when_a_file_without_a_namespace_declares_another_class() {
+    // The `namespace` statement the move writes above the class would
+    // cover `Baz` as well.
+    let text = concat!("<?php\n", "class Foo {}\n", "\n", "class Baz {}\n");
+
+    let message = refusal_moving_foo(text, 1).await;
+
+    assert!(
+        message.contains("`Baz`"),
+        "the neighbour should be named in the refusal: {message}"
+    );
+}
+
+#[tokio::test]
+async fn class_move_is_not_refused_for_a_define_call_beside_the_class() {
+    // `define('LIMIT', 1)` names its constant in full, so the `namespace`
+    // statement has no say in it.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "define('LIMIT', 1);\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 3, 6, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace C;\n",
+            "\n",
+            "class Foo {}\n",
+            "\n",
+            "define('LIMIT', 1);\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_carries_a_class_declared_in_every_branch_of_a_conditional() {
+    // Both declarations are the one class, so the statement that moves the
+    // first one moves the second with it.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "if (PHP_VERSION_ID >= 80000) {\n",
+        "    class Foo {}\n",
+        "} else {\n",
+        "    class Foo {}\n",
+        "}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 4, 10, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace C;\n",
+            "\n",
+            "if (PHP_VERSION_ID >= 80000) {\n",
+            "    class Foo {}\n",
+            "} else {\n",
+            "    class Foo {}\n",
             "}\n",
         )
     );

@@ -26,7 +26,10 @@ use crate::util::{build_fqn, strip_fqn_prefix};
 
 use super::RenameOutcome;
 use imports::{has_import_collision, namespace_owns, pick_collision_alias};
-use layout::{class_declaration_span, insert_namespace_edit, remove_namespace_edits};
+use layout::{
+    class_declaration_span, display_uri, insert_namespace_edit, remove_namespace_edits,
+    section_neighbour,
+};
 use rewrite::{FileRewrite, locations_by_block};
 use siblings::build_sibling_import_edits;
 
@@ -447,6 +450,11 @@ impl Backend {
     /// carries the same guard: `Ok(None)` abandons the move when the map
     /// does not describe the file, does not hold the class's declaration,
     /// or the span no longer spells the namespace it claims to.
+    ///
+    /// The statement names the namespace of everything its section
+    /// declares, so `Err` refuses a move of a class that shares its
+    /// section: the other declarations would change namespace with it
+    /// while every reference to them stayed as it was.
     fn namespace_declaration_edits(
         &self,
         mv: &ClassMove<'_>,
@@ -475,6 +483,22 @@ impl Backend {
         };
         if !sm.matches_source(&file.content) {
             return Ok(None);
+        }
+
+        if let Some(neighbour) =
+            section_neighbour(&sm, &file.content, class_block, mv.old_short_name)
+        {
+            let destination = mv.new_ns.map_or_else(
+                || "the global namespace".to_string(),
+                |ns| format!("`{ns}`"),
+            );
+            return Err(format!(
+                "Cannot move `{}` to `{}`: {} also declares {neighbour} beside it, and the move \
+                 would put {neighbour} in {destination} too.",
+                mv.old_fqn,
+                mv.new_fqn,
+                display_uri(file_uri_str)
+            ));
         }
 
         let siblings = self.sibling_imports_for_move(&sm, file, mv.old_ns);
