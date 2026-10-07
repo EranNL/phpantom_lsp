@@ -326,6 +326,61 @@ fn resolve_import_all_adds_blank_line_after_namespace() {
 }
 
 #[test]
+fn resolve_import_all_writes_inline_when_the_namespace_block_is_on_one_line() {
+    let backend = crate::Backend::new_test();
+    let uri = "file:///test.php";
+    let content =
+        "<?php\nnamespace App { class Foo { function f(Request $r, Collection $c) {} } }\n";
+    backend.update_ast(uri, content);
+
+    {
+        let mut cmap = backend.symbols.fqn_uri_index.write();
+        cmap.insert(
+            "Illuminate\\Http\\Request".to_string(),
+            "file:///vendor/Request.php".to_string(),
+        );
+        cmap.insert(
+            "Illuminate\\Support\\Collection".to_string(),
+            "file:///vendor/Collection.php".to_string(),
+        );
+    }
+
+    {
+        let mut files = backend.open_files.write();
+        files.insert(uri.to_string(), Arc::new(content.to_string()));
+    }
+
+    let data = super::super::CodeActionData {
+        action_kind: "source.importAllClasses".to_string(),
+        uri: uri.to_string(),
+        range: Range::default(),
+        extra: serde_json::json!({}),
+    };
+
+    let ws_edit = backend
+        .resolve_import_all_classes(&data, content)
+        .expect("expected a WorkspaceEdit");
+    let changes = ws_edit.changes.unwrap();
+    let edits = changes.get(&uri.parse::<Url>().unwrap()).unwrap();
+
+    // Both imports go straight after the `{`, in the order an array of
+    // edits at one position is applied, with nothing to set them off.
+    let after_brace = Position::new(1, 15);
+    assert!(
+        edits.iter().all(|edit| edit.range.start == after_brace),
+        "every import belongs just after the brace, got {edits:?}"
+    );
+    let texts: Vec<&str> = edits.iter().map(|edit| edit.new_text.as_str()).collect();
+    assert_eq!(
+        texts,
+        [
+            " use Illuminate\\Http\\Request;",
+            " use Illuminate\\Support\\Collection;"
+        ]
+    );
+}
+
+#[test]
 fn resolve_import_all_interleaves_with_existing_imports() {
     let backend = crate::Backend::new_test();
     let uri = "file:///test.php";

@@ -272,20 +272,24 @@ member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's `@use` group
 members (`group_member_removal`, in the same file) already chooses this way.
 
-### B562. An import written into a `namespace` block that sits on one line lands after the block
+### B571. An import written into a file with no `namespace` lands after code that shares the `<?php` line
 
 **Impact: Low · Complexity: Medium**
 
 ```php
-<?php
-namespace B { class Foo { public function f(): Helper {} } }
+<?php class Foo { public function f(): Helper {} }
 ```
 
-With `B\Helper` declared elsewhere, moving `B\Foo` to `C\Foo` writes
-`use B\Helper;` on the line below the block, outside every `namespace`, and
-PHP refuses the file. `analyze_use_block_in` (`src/completion/use_edit.rs`)
-puts the first import of a block that has none on the line after its
-`namespace` line, which is past the block when the block closes on that
-line, and every import planned through it shares the placement. The import
-belongs just after the `{` or `;` of the declaration, which `UseBlockInfo`
-cannot express: its positions are whole lines.
+With `B\Helper` declared elsewhere, importing it writes `use B\Helper;` on the
+line below, after the class, where it reaches nothing written above it.
+`analyze_use_block_in` (`src/completion/use_edit.rs`) puts the first import
+of a file with no `namespace` on the line `header_insert_line`
+(`src/text_scan.rs`) names, which reads the header a line at a time: a line
+starting `<?php` or `declare(` is all header, whatever follows it on that
+line. The import belongs just after the opening tag, or after the
+`declare(...);` that follows it, the way `FirstImport::Inline` already places
+one after a `namespace` declaration. `insert_namespace_edit`
+(`src/rename/class/layout.rs`) and the "add namespace" fix
+(`src/code_actions/fix_namespace.rs`) read the header through the same
+helper, and a `namespace` statement written after code is a fatal error
+rather than a misplaced import.

@@ -238,7 +238,7 @@ pub(super) struct SiblingImport {
 /// stands for.
 ///
 /// The positions are all computed against the unmodified block, so
-/// imports that would land on the same line are merged into a single
+/// imports that would land on the same position are merged into a single
 /// edit: two zero-width edits sharing an offset land in whichever order
 /// the client applies them.
 pub(super) fn build_sibling_import_edits(
@@ -251,10 +251,10 @@ pub(super) fn build_sibling_import_edits(
 
     let use_block = crate::completion::use_edit::analyze_use_block_in(&file.content, file.block);
 
-    let mut by_line: BTreeMap<u32, Vec<&SiblingImport>> = BTreeMap::new();
+    let mut by_position: BTreeMap<Position, Vec<&SiblingImport>> = BTreeMap::new();
     for import in imports {
-        let line = use_block.insert_position_for_key(&import.sort_key).line;
-        by_line.entry(line).or_default().push(import);
+        let position = use_block.insert_position_for_key(&import.sort_key);
+        by_position.entry(position).or_default().push(import);
     }
 
     // Which of the three import groups the file already writes, so the
@@ -266,23 +266,20 @@ pub(super) fn build_sibling_import_edits(
     }
 
     let mut first = true;
-    let mut edits = Vec::with_capacity(by_line.len());
-    for (line, group) in by_line {
+    let mut edits = Vec::with_capacity(by_position.len());
+    for (position, group) in by_position {
         let mut new_text = String::new();
         for import in group {
             let idx = UseBlockInfo::key_group(&import.sort_key) as usize;
             let opens_use_block = first && use_block.existing.is_empty() && use_block.has_namespace;
             let opens_group =
                 !group_present[idx] && group_present[..idx].iter().any(|present| *present);
-            if opens_use_block || opens_group {
-                new_text.push('\n');
-            }
-            new_text.push_str(&import.statement);
-            new_text.push('\n');
+            new_text.push_str(
+                &use_block.import_text(&import.statement, opens_use_block || opens_group),
+            );
             group_present[idx] = true;
             first = false;
         }
-        let position = Position { line, character: 0 };
         edits.push(TextEdit {
             range: Range {
                 start: position,

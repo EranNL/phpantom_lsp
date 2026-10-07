@@ -1580,6 +1580,61 @@ async fn class_move_imports_the_siblings_of_the_unbraced_section_that_declares_t
     );
 }
 
+#[tokio::test]
+async fn class_move_imports_the_siblings_into_a_block_written_on_one_line() {
+    // The line after the block is outside every `namespace`, so the import
+    // has to go inside the braces.
+    let text = concat!(
+        "<?php\n",
+        "namespace B { class Foo { public function f(): Helper {} } }\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 1).await,
+        concat!(
+            "<?php\n",
+            "namespace C { use B\\Helper; class Foo { public function f(): Helper {} } }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_the_siblings_ahead_of_code_on_its_namespace_statements_line() {
+    // The line after the statement is past the class that needs the import.
+    let text = concat!(
+        "<?php\n",
+        "namespace B; class Foo { public function f(): Helper {} }\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 1).await,
+        concat!(
+            "<?php\n",
+            "namespace C; use B\\Helper; class Foo { public function f(): Helper {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_imports_the_siblings_into_the_one_line_block_that_declares_the_class() {
+    // With several blocks, the import is planned against the block the move
+    // leaves, and the other one-line block is left as it was.
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo { public function f(): Helper {} } }\n",
+    );
+
+    assert_eq!(
+        move_foo_beside_b_helper(text, 2).await,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { use B\\Helper; class Foo { public function f(): Helper {} } }\n",
+        )
+    );
+}
+
 // ─── A section shared with other declarations ───────────────────────────────
 
 /// Open `text`, move the `Foo` named on `line` to `C\Foo`, and return the

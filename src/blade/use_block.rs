@@ -12,7 +12,7 @@ use tower_lsp::lsp_types::{Position, Range, TextEdit};
 use super::directives::{DirectiveHead, directive_head};
 use super::source_map::BladeSourceMap;
 use super::use_directive::{first_string_literal, imported_name, use_directives};
-use crate::completion::use_edit::{UseBlockInfo, extract_use_sort_key};
+use crate::completion::use_edit::{FirstImport, UseBlockInfo, extract_use_sort_key};
 
 /// Where a Blade template's imports go, in the virtual-PHP coordinates
 /// every edit is planned in.
@@ -190,7 +190,7 @@ pub(crate) fn analyze_template_use_block(
 
     UseBlockInfo {
         existing,
-        fallback_line: line_start.line,
+        fallback: FirstImport::OwnLine(line_start.line),
         has_namespace: false,
         template: Some(TemplateUseBlock { line_ends, top }),
     }

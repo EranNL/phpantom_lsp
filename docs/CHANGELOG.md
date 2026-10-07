@@ -61,6 +61,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Config keys a package sets from its service provider are known.** `auth('sanctum')` is no longer reported as an unknown guard, and neither is any other key a package's provider sets with `config([...])` or `Config::set()` instead of shipping it in a config file.
 - **`in_array()` only narrows by what the list proves.** When `in_array($x, $list, true)` is false for a `list<string>` or `list<User>`, `$x` can still be a string or a `User`, since the list may not hold that one, and when it is true for a list of `mixed` values, `$x` keeps its classes. A literal list such as `[null, '']` narrows both ways, now also when it is stored in a variable first.
 - **A raw Blade echo written inside literal braces is read as a raw echo.** In `{{!!$html!!}}`, the braces around the echo are plain text, so hovering one no longer shows `e()` or leads to its declaration, and the echo's own `{!!` and `!!}` are described and coloured as a raw echo's.
+- **An import added to a `namespace` written on one line goes inside it.** A `use` from a code action, completion, or class move is no longer written after the closing `}` of `namespace B { class Foo {} }`, outside the block, where PHP refuses the file. A `namespace` whose `{` is on the next line no longer gets the `use` between its name and the brace.
 
 ## [0.11.0] - 2026-10-05
 
