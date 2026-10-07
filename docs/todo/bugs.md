@@ -168,33 +168,31 @@ the merged files are.
 
 ## Blade
 
-### B569. Hovering a raw echo's opener written without a space shows the expression behind it
+### B570. A raw echo written inside literal braces is read as an escaped echo
 
-**Impact: Low · Complexity: Low**
+**Impact: Low · Complexity: Low-Medium**
 
 ```blade
-{!!$html!!}
+{{!!$html!!}}
 ```
 
-Hovering the `{!!` shows the hover of `$html`. `{!! $html !!}` shows nothing
-there, and the `{{` of `{{$html}}` shows `e()`.
+Blade matches echo tags longest-opening-first, so this is a literal `{`, a
+raw echo of `$html`, and a literal `}`, which is how the preprocessor lowers
+it. Hovering the `!!` of the raw opener shows the hover of `$html`, and the
+braces around the echo show `e()`.
 
-`{!!` becomes ` echo `, and `BladeSourceMap::blade_to_php` maps the opener's
-columns to where that replacement ends. With the usual space the PHP there is
-whitespace, but without it the replacement ends on the first column of the
-expression, so the map cannot tell the generated `echo` from the template's
-own text. The `{{` case never reaches the map: `blade_echo_delimiter_hover`
-(`src/blade/echo_delimiter.rs`) answers it first and has nothing for `{!!` or
-`!!}`, although the comment above the hover handler in `src/server.rs` says
-it covers `{!!`.
+`mode_at` (`src/blade/directive_completion.rs`) reads the `{{` of `{{!!` as
+an escaped echo opener and scans on to the next `}}`, so
+`blade_echo_delimiter_at` (`src/blade/echo_delimiter.rs`) never sees the raw
+opener inside it. `is_echo_start` and `echo_delimiters`
+(`src/blade/signature.rs`) read it the same way.
 
-**Fix:** Answer the raw-echo delimiters in `blade_echo_delimiter_hover` and
-`blade_echo_delimiter_definition` the way `{{` is answered, so the opener
-describes itself instead of falling through to the map. Mapping a column
-inside any opener to a column of its replacement would cover every opener at
-once, but it moves what `analyze_template_use_block`
-(`src/blade/use_block.rs`) reads from the start of a line, so check that
-first.
+**Fix:** Make the three scanners agree with `echo::open`
+(`src/blade/preprocessor/echo.rs`): a `{{` followed by `!!` is a literal
+brace, and the raw echo starts at the second `{`. `mode_at` also feeds the
+component-tag and block-pairing checks (`src/blade/component_tags/mod.rs`,
+`src/blade/blocks.rs`) and directive completion, so run those alongside the
+hover tests.
 
 ## Templates
 

@@ -236,4 +236,86 @@ mod tests {
             }
         }
     }
+
+    /// A raw echo's delimiters lower to a bare `echo` and a `;`, and with no
+    /// space between the opener and the expression the generated `echo` ends
+    /// right where the expression starts. Hovering a delimiter must describe
+    /// the echo, never the expression behind it, with or without the space.
+    #[tokio::test]
+    async fn hovering_a_raw_echo_delimiter_describes_the_echo_not_the_expression() {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///raw-echo-hover.blade.php").unwrap();
+        let template = "@php($html = '<b>bold</b>')\n\
+                        {!!$html!!}\n\
+                        {!! $html !!}\n\
+                        <p>{!!$html!!}</p>\n\
+                        <p>æøå {!!$html!!}</p>\n";
+        open_document(&backend, &uri, "blade", template).await;
+
+        // `(line, column of the opener, column of the closer)`, in UTF-16
+        // units like the positions an editor sends.
+        for (line, opener, closer) in [(1, 0, 8), (2, 0, 10), (3, 3, 11), (4, 7, 15)] {
+            for start in [opener, closer] {
+                let expected = Range {
+                    start: Position {
+                        line,
+                        character: start,
+                    },
+                    end: Position {
+                        line,
+                        character: start + 3,
+                    },
+                };
+                for column in start..start + 3 {
+                    let hover = backend
+                        .hover(HoverParams {
+                            text_document_position_params: TextDocumentPositionParams {
+                                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                                position: Position {
+                                    line,
+                                    character: column,
+                                },
+                            },
+                            work_done_progress_params: WorkDoneProgressParams::default(),
+                        })
+                        .await
+                        .unwrap()
+                        .unwrap_or_else(|| panic!("expected a hover at {line}:{column}"));
+                    let HoverContents::Markup(markup) = hover.contents else {
+                        panic!("expected markup at {line}:{column}");
+                    };
+                    assert!(
+                        markup.value.contains("raw echo") && !markup.value.contains("$html"),
+                        "{line}:{column} is a raw echo delimiter, which describes the echo: {}",
+                        markup.value
+                    );
+                    assert_eq!(
+                        hover.range,
+                        Some(expected),
+                        "{line}:{column} must highlight the whole delimiter"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The expression between the delimiters keeps its own hover: only the
+    /// delimiters themselves describe the echo.
+    #[tokio::test]
+    async fn hovering_the_expression_of_a_raw_echo_still_describes_it() {
+        let backend = create_test_backend();
+        let uri = Url::parse("file:///raw-echo-expression-hover.blade.php").unwrap();
+        let template = "@php($html = '<b>bold</b>')\n{!!$html!!}\n{!! $html !!}\n";
+        open_document(&backend, &uri, "blade", template).await;
+
+        for (line, columns) in [(1, 3..8), (2, 4..9)] {
+            for column in columns {
+                let hover = hover_text_at(&backend, &uri, line, column).await;
+                assert!(
+                    hover.is_some_and(|text| text.contains("$html")),
+                    "{line}:{column} is on `$html`, which describes the variable"
+                );
+            }
+        }
+    }
 }
