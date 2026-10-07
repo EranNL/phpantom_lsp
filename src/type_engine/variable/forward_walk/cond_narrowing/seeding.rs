@@ -530,9 +530,7 @@ pub(crate) fn collect_condition_var_names_inner(expr: &Expression<'_>, names: &m
                 _ => return,
             };
             if matches!(
-                crate::util::strip_fqn_prefix(func_name)
-                    .to_ascii_lowercase()
-                    .as_str(),
+                crate::ci_map::fold(crate::util::strip_fqn_prefix(func_name)).as_ref(),
                 "is_a"
                     | "get_class"
                     | "class_exists"

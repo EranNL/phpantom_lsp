@@ -37,114 +37,35 @@ No outstanding items.
 
 ## Narrowing
 
-### B550. Type-check functions only narrow when written in lowercase
-
-**Impact: Low · Complexity: Low**
-
-PHP function names are case-insensitive, so `Is_String($x)` and
-`IS_RESOURCE($this->stream)` are the same checks as their lowercase
-spellings. The guard table (`type_guard_kind_from_name` in
-`type_engine/types/narrowing/guards.rs`), `narrows_first_argument`, and
-the class-string and member-existence extractors match the name
-case-sensitively, so a mixed-case guard narrows nothing and the branch
-keeps the wide type. The `is_a()` and `in_array()` extractors already
-compare case-insensitively. Fold the name to lowercase once where these
-helpers read it (without allocating on the common lowercase path).
-
-### B555. Comparing an array to an array literal with `===` narrows neither branch
-
-**Impact: Low · Complexity: Medium**
-
-```php
-/** @param list{string} $arr */
-function takesStringList(array $arr): void {}
-
-function caller(?string $val): void
-{
-    $arr = [$val];           // array{string|null}
-    if ($arr === [null]) {
-        return;              // $arr is still array{string|null} here, not array{null}
-    }
-    takesStringList($arr);   // reported, but $arr can only be array{string} here
-}
-```
-
-`literal_comparand_type`
-(`src/type_engine/variable/forward_walk/cond_narrowing/predicates.rs`)
-recognises only the empty array among array literals, so
-`apply_literal_identity_narrowing` (`cond_narrowing/emptiness.rs`) never
-sees `[null]` as a value to pin or strip, and `$arr` keeps its type in both
-branches. Guarding on the element instead (`$arr[0] === null`) narrows
-correctly. The equal branch should narrow the subject to the literal's
-shape (`array{null}`). The unequal branch can subtract the literal from a
-shape with the same keys when every other entry is already pinned to the
-literal's value, which a one-entry shape always is.
-
-The guarded call became a false positive in 0.11.0, which started
-reporting the unguarded one (`array{string|null}` passed to
-`list{string}`). PHPStan and Psalm report it too. mago narrows.
-
-Found running the php-typing-conformance suite
-(`regressions_array_element_null_subtraction.php`).
-
-### B559. A `match (true)` arm with several conditions is narrowed as if all of them held
-
-**Impact: Medium · Complexity: Low**
-
-```php
-function f(Cat|Dog|null $p): void {
-    match (true) {
-        // Runs when *either* check holds, so `$p` is `Cat|Dog` here,
-        // but no mismatch is reported.
-        $p instanceof Cat, $p instanceof Dog => takesDog($p),
-        default => null,
-    };
-}
-```
-
-The arm body runs when any one of its conditions is `true`, but both the
-diagnostic snapshot walker (`record_match_ternary_snapshots`) and the
-completion/hover walker (`apply_cursor_ternary_narrowing`) apply each
-condition's truthy narrowing to the same scope in turn, which is the
-narrowing of `a && b`. Each condition should narrow its own copy of the
-scope and the copies should be joined, as the `||` pass does.
-
-### B560. An `&&` inside a `match (true)` arm condition does not narrow its later operands
-
-**Impact: Medium · Complexity: Low**
-
-```php
-function f(?string $s): void {
-    match (true) {
-        // `strlen($s)` reports `?string`.
-        is_string($s) && strlen($s) > 1 => null,
-        default => null,
-    };
-}
-```
-
-The same condition narrows its right operand in an `if`, an assignment,
-or a ternary, and an `&&` chain in an arm *body* narrows too. Only the arm
-conditions of a `match (true)` are missing from the short-circuit snapshot
-recording.
-
-### B561. A `match (true)` passed straight into a call ignores its arm narrowing
+### B565. A failed strict `in_array()` rules out the haystack's element type, not the values it holds
 
 **Impact: Medium · Complexity: Medium**
 
 ```php
-function f(Cat|Dog $p): void {
-    // Reports `Dog|Cat`; assigned to a variable first, the value is `Dog`.
-    takesDog(match (true) { $p instanceof Cat => new Dog(), default => $p });
+/** @param list<string> $haystack */
+function f(string|int|null $x, array $haystack): void {
+    if (!in_array($x, $haystack, true)) {
+        takesInt($x); // reports `int|null`, but a string missing from `$haystack` gets here too
+    }
 }
 ```
 
-The `match` value's arm narrowing lives in the `Expression::Match` case of
-`resolve_rhs_expression` (`rhs_resolution/mod.rs`), and none of it reaches
-an argument, not even the `instanceof` extractor that works without a
-scope. The same ternary passed as an argument does narrow, so the argument
-path resolves a `match` through some other route than the ternary's; find
-it and route it through the shared one.
+In the branch where the check failed, `apply_in_array_narrowing`
+(`cond_narrowing/in_array.rs`) excludes the haystack's whole element type
+from the needle: the class layer through `apply_instanceof_exclusion`, and
+the rest through `strip_literal_from_type` once per alternative. Failing the
+check only proves the needle is none of the values the haystack holds, so
+the exclusion is sound only for a value the haystack is known to hold: an
+entry of a sealed shape, such as the literal `['draft', 'archived']`, whose
+type is one value. A `list<AdminUser>` haystack drops `AdminUser` from an
+`AdminUser|RegularUser` needle the same way, and
+`test_in_array_strict_else_branch_excludes` and its guard-clause siblings in
+`tests/integration/completion_in_array_narrowing.rs` assert that. PHPStan
+narrows this branch only when the haystack's element type is a finite set
+of values.
+
+**Fix:** Exclude only the single values the haystack's type lists as
+present, and turn the tests that expect a class to be excluded around.
 
 ## Arithmetic
 
@@ -222,7 +143,28 @@ not contradict a list.
 
 ## Laravel
 
-No outstanding items.
+### B566. A guard a package adds from its service provider is reported as unknown
+
+**Impact: Medium · Complexity: Medium**
+
+```php
+auth('sanctum')->user(); // reported: Unknown auth guard: 'sanctum'
+```
+
+`laravel/sanctum` adds its guard in `SanctumServiceProvider::register()`
+with `config(['auth.guards.sanctum' => …])`, not through
+`mergeConfigFrom()`, so the guard never reaches the config key index. A
+package's config is read only from the files its provider hands to
+`mergeConfigFrom()` (`extract_provider_resources` in
+`virtual_members/laravel/provider_resources.rs`), and runtime config writes
+only from project files (`config_write_keys` in `config_keys.rs` leaves
+vendor maps out, so that diagnostics do not depend on which vendor classes
+happen to be loaded). Every app that installs Sanctum and names its guard
+gets the diagnostic.
+
+**Fix:** Read the `config([...])` writes in the providers whose
+`mergeConfigFrom()` calls are already read, which is as deterministic as
+the merged files are.
 
 ## Blade
 

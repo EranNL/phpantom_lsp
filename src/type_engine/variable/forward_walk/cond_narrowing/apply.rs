@@ -21,11 +21,16 @@ pub(crate) fn apply_class_match_arm_narrowing<'b>(
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    let classes: Vec<PhpType> = expr_arm
+    // The arm runs when any one condition matches, so a condition that
+    // names no class lets the subject in whatever its class.
+    let Some(classes) = expr_arm
         .conditions
         .iter()
-        .filter_map(|c| narrowing::class_match_condition_class(c))
-        .collect();
+        .map(|c| narrowing::class_match_condition_class(c))
+        .collect::<Option<Vec<PhpType>>>()
+    else {
+        return;
+    };
     if classes.is_empty() {
         return;
     }
@@ -575,19 +580,45 @@ pub(crate) fn match_true_condition_is_boolean(
         })
 }
 
-/// Narrow `scope` by a failed `match (true)` arm: every one of its
-/// conditions was tested and none was `true`, so each inverse holds at once.
-pub(crate) fn apply_failed_match_arm_narrowing<'b>(
+/// Narrow `scope` to what the body of a `match (true)` arm sees.
+///
+/// The body runs when any one of the arm's conditions is `true`, so it sees
+/// what `a || b` proves rather than what `a && b` would: each condition
+/// narrows its own copy of the scope, and the copies are joined.
+pub(crate) fn apply_match_arm_narrowing<'b>(
     expr_arm: &'b MatchExpressionArm<'b>,
     scope: &mut ScopeState,
     ctx: &ForwardWalkCtx<'_>,
 ) {
-    for condition in expr_arm.conditions.iter() {
-        if match_true_condition_is_boolean(condition, || {
-            super::super::resolve_rhs_with_scope(condition, scope, ctx)
-        }) {
-            apply_condition_narrowing_inverse(condition, scope, ctx);
-        }
+    let conditions: Vec<&'b Expression<'b>> = expr_arm.conditions.iter().copied().collect();
+    if let [condition] = conditions.as_slice() {
+        apply_condition_narrowing(condition, scope, ctx);
+        return;
+    }
+    // Seeded before the legs split, as the `||` pass does, so that what a
+    // leg concludes about a member path is checked against what the scope
+    // already knew about it.
+    for condition in &conditions {
+        seed_property_keys_into_scope(condition, scope, ctx);
+    }
+    apply_any_leg_narrowing(&conditions, &[], scope, ctx);
+}
+
+/// Narrow `scope` by one `match (true)` arm condition that was tested and
+/// was not `true`.
+///
+/// That is what the conditions after it are evaluated under, and once every
+/// condition of an arm has failed, what the arms below it run under: none
+/// of the conditions held, so each inverse holds at once.
+pub(crate) fn apply_failed_match_condition_narrowing<'b>(
+    condition: &'b Expression<'b>,
+    scope: &mut ScopeState,
+    ctx: &ForwardWalkCtx<'_>,
+) {
+    if match_true_condition_is_boolean(condition, || {
+        super::super::resolve_rhs_with_scope(condition, scope, ctx)
+    }) {
+        apply_condition_narrowing_inverse(condition, scope, ctx);
     }
 }
 

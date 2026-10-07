@@ -31,9 +31,11 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
             };
             // An arm runs only after every arm above it failed, and
             // `default` only after all of them did, so the inverse of
-            // their conditions holds in its body.
-            // Built on a copy: a cursor outside every arm body (in a
-            // condition, say) must see the scope untouched.
+            // their conditions holds in its body.  The same goes for a
+            // condition, which is tested only once every condition before
+            // it failed.
+            // Built on a copy: a cursor in no condition or body (on a `=>`,
+            // say) must see the scope untouched.
             let mut failed_scope = scope.clone();
             let mut default_expr = None;
             for arm in match_expr.arms.iter() {
@@ -41,14 +43,23 @@ pub(crate) fn apply_cursor_ternary_narrowing<'b>(
                     MatchArm::Expression(expr_arm) => {
                         if contains_cursor(expr_arm.expression) {
                             *scope = failed_scope;
-                            for condition in expr_arm.conditions.iter() {
-                                apply_condition_narrowing(condition, scope, ctx);
-                            }
+                            apply_match_arm_narrowing(expr_arm, scope, ctx);
                             // Recurse into the arm body for nested patterns.
                             apply_cursor_ternary_narrowing(expr_arm.expression, scope, ctx);
                             return;
                         }
-                        apply_failed_match_arm_narrowing(expr_arm, &mut failed_scope, ctx);
+                        for condition in expr_arm.conditions.iter() {
+                            if contains_cursor(condition) {
+                                *scope = failed_scope;
+                                apply_cursor_ternary_narrowing(condition, scope, ctx);
+                                return;
+                            }
+                            apply_failed_match_condition_narrowing(
+                                condition,
+                                &mut failed_scope,
+                                ctx,
+                            );
+                        }
                     }
                     MatchArm::Default(def_arm) if contains_cursor(def_arm.expression) => {
                         default_expr = Some(def_arm.expression);

@@ -7,6 +7,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::atom::{Atom, atom, bytes_to_str};
+use crate::ci_map::fold;
 use crate::php_type::{PhpType, TypeKind};
 use crate::types::{AssertionKind, ClassInfo, ClassLikeKind, ResolvedType};
 
@@ -47,14 +48,12 @@ pub(in crate::type_engine) fn try_extract_class_string_guard(
                 .map(|(target, negated)| (target, !negated))
         }
         Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => {
-                    bytes_to_str(ident.value()).trim_start_matches('\\')
-                }
-                _ => return None,
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
             };
+            let func_name = fold(bytes_to_str(ident.value()).trim_start_matches('\\'));
             let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
-            match func_name {
+            match func_name.as_ref() {
                 "is_a" => {
                     if args.len() < 3 {
                         return None;
@@ -137,17 +136,15 @@ pub(in crate::type_engine) fn try_extract_member_exists_guard(
             None
         }
         Expression::Call(Call::Function(func_call)) => {
-            let func_name = match func_call.function {
-                Expression::Identifier(ident) => {
-                    bytes_to_str(ident.value()).trim_start_matches('\\')
-                }
-                _ => return None,
+            let Expression::Identifier(ident) = func_call.function else {
+                return None;
             };
-            let is_method = match func_name {
-                "property_exists" => false,
-                "method_exists" => true,
-                _ => return None,
-            };
+            let is_method =
+                match fold(bytes_to_str(ident.value()).trim_start_matches('\\')).as_ref() {
+                    "property_exists" => false,
+                    "method_exists" => true,
+                    _ => return None,
+                };
             let args: Vec<_> = func_call.argument_list.arguments.iter().collect();
             if args.len() < 2 {
                 return None;
@@ -856,9 +853,10 @@ const TRAVERSABLE_FQN: &str = "Traversable";
 
 /// The domain a `is_*()` builtin tests its argument against.
 ///
-/// Returns `None` for any other function name.
+/// Returns `None` for any other function name.  PHP function names are
+/// case-insensitive, so `Is_String` names the same check as `is_string`.
 pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
-    Some(match name.trim_start_matches('\\') {
+    Some(match fold(name.trim_start_matches('\\')).as_ref() {
         "is_array" => TypeGuardKind::Array,
         "is_string" => TypeGuardKind::String,
         "is_int" | "is_integer" | "is_long" => TypeGuardKind::Int,
@@ -886,10 +884,10 @@ pub(crate) fn type_guard_kind_from_name(name: &str) -> Option<TypeGuardKind> {
 /// the class-string form), `try_extract_class_string_guard`,
 /// `try_extract_member_exists_guard`, and `try_extract_in_array`.
 pub(crate) fn narrows_first_argument(name: &str) -> bool {
-    let name = name.trim_start_matches('\\');
-    type_guard_kind_from_name(name).is_some()
+    let name = fold(name.trim_start_matches('\\'));
+    type_guard_kind_from_name(&name).is_some()
         || matches!(
-            name,
+            name.as_ref(),
             "is_a"
                 | "class_exists"
                 | "interface_exists"
