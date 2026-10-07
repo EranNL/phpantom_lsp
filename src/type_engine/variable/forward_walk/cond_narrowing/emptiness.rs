@@ -317,7 +317,7 @@ fn strip_array_literal_from_shape(ty: &PhpType, excluded: &PhpType) -> Option<Op
 
 /// Whether `ty` holds exactly one value: a scalar literal, `null`, `true`,
 /// `false`, or a sealed shape whose every entry is one of those.
-fn is_single_value(ty: &PhpType) -> bool {
+pub(super) fn is_single_value(ty: &PhpType) -> bool {
     match ty.kind() {
         TypeKind::Literal(_) => true,
         TypeKind::Named(name) => ["null", "true", "false"]

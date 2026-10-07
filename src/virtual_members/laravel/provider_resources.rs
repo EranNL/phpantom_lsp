@@ -16,7 +16,9 @@ use super::view_data::{SharedViewVar, ViewComposer, ViewDataRegistration, view_d
 use crate::atom::bytes_to_str;
 use crate::ci_map::CiSet;
 use crate::names::OwnedResolvedNames;
-use crate::symbol_map::extraction::laravel::{chain_roots_at_facade, is_laravel_container_expr};
+use crate::symbol_map::extraction::laravel::{
+    chain_roots_at_facade, config_keys_written_by, is_laravel_container_expr,
+};
 
 /// How many `->` links a `Route::…->group(path)` registration may put
 /// between the facade and the `group()` call. `Route::middleware(…)
@@ -132,6 +134,10 @@ pub(crate) struct Alias {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ProviderResources {
     pub config_files: Vec<ProviderResource>,
+    /// Config keys a provider writes at runtime rather than ships in a file,
+    /// in dot notation: `laravel/sanctum` adds its guard with
+    /// `config(['auth.guards.sanctum' => …])` from `register()`.
+    pub config_writes: Vec<String>,
     pub view_dirs: Vec<ProviderResource>,
     pub trans_dirs: Vec<ProviderResource>,
     pub route_files: Vec<PathBuf>,
@@ -192,6 +198,7 @@ pub(crate) struct ProviderResources {
 impl ProviderResources {
     pub fn merge(&mut self, other: ProviderResources) {
         self.config_files.extend(other.config_files);
+        self.config_writes.extend(other.config_writes);
         self.view_dirs.extend(other.view_dirs);
         self.trans_dirs.extend(other.trans_dirs);
         self.route_files.extend(other.route_files);
@@ -435,6 +442,10 @@ pub(crate) fn extract_provider_resources(
     let resolved = OwnedResolvedNames::from_resolved(&NameResolver::new(&arena).resolve(program));
 
     super::helpers::walk_program_expressions(program, &mut |expr| {
+        resources
+            .config_writes
+            .extend(config_keys_written_by(expr, content));
+
         // Any direct use of the `Route` facade means routes are registered
         // from this file rather than only pointed at.
         if let Expression::Call(Call::StaticMethod(sc)) = expr
@@ -1824,6 +1835,39 @@ mod tests {
                 path: PathBuf::from("/ws/config/bakery.php"),
                 namespace: "bakery".to_string(),
             }]
+        );
+    }
+
+    #[test]
+    fn records_the_config_keys_a_provider_writes() {
+        // `laravel/sanctum` adds its guard this way rather than in a config
+        // file it merges.  The read nested in the guard's value, and the
+        // read after it, declare nothing.
+        let content = "<?php\n\
+            class SanctumServiceProvider {\n\
+                public function register(): void {\n\
+                    config([\n\
+                        'auth.guards.sanctum' => array_merge(['driver' => 'sanctum'], config('auth.guards.sanctum', [])),\n\
+                    ]);\n\
+                    Config::set('queue.connections.package', ['driver' => 'sync']);\n\
+                    config()->set('mail.mailers.package', []);\n\
+                    config('app.name');\n\
+                }\n\
+            }\n";
+        let resources = extract_provider_resources(
+            content,
+            Path::new("/ws/vendor/laravel/sanctum/src/SanctumServiceProvider.php"),
+            Path::new("/ws"),
+            ClassContext::default(),
+            Default::default(),
+        );
+        assert_eq!(
+            resources.config_writes,
+            [
+                "auth.guards.sanctum",
+                "queue.connections.package",
+                "mail.mailers.package"
+            ]
         );
     }
 

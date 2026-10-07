@@ -58,6 +58,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A ternary or `match` to the right of `&&` or `||` knows what the left side proved.** `$x !== null && ($x->ready ? process($x) : null)` no longer reports `$x` as possibly `null` inside the ternary.
 - **Hovering a Blade component tag's name or a directive's keyword shows nothing unrelated.** On `<x-panel :author="$post->author">` or `@if($cond)`, hovering the tag name or `@if` no longer describes code the template never wrote or the expression after it.
 - **Hovering a raw Blade echo's `{!!` or `!!}` describes the echo.** On `{!!$html!!}`, hovering either delimiter no longer shows the hover of `$html`, and go-to-definition on it no longer jumps to the variable. The hover now says the output is not escaped.
+- **Config keys a package sets from its service provider are known.** `auth('sanctum')` is no longer reported as an unknown guard, and neither is any other key a package's provider sets with `config([...])` or `Config::set()` instead of shipping it in a config file.
+- **`in_array()` only narrows by what the list proves.** When `in_array($x, $list, true)` is false for a `list<string>` or `list<User>`, `$x` can still be a string or a `User`, since the list may not hold that one, and when it is true for a list of `mixed` values, `$x` keeps its classes. A literal list such as `[null, '']` narrows both ways, now also when it is stored in a variable first.
 
 ## [0.11.0] - 2026-10-05
 

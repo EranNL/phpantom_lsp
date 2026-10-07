@@ -37,35 +37,31 @@ No outstanding items.
 
 ## Narrowing
 
-### B565. A failed strict `in_array()` rules out the haystack's element type, not the values it holds
+### B568. A passing strict `in_array()` against `object` elements drops the needle's classes
 
-**Impact: Medium · Complexity: Medium**
+**Impact: Low · Complexity: Low-Medium**
 
 ```php
-/** @param list<string> $haystack */
-function f(string|int|null $x, array $haystack): void {
-    if (!in_array($x, $haystack, true)) {
-        takesInt($x); // reports `int|null`, but a string missing from `$haystack` gets here too
+/** @param list<object> $handlers */
+function f(Foo|Bar|string $x, array $handlers): void {
+    if (in_array($x, $handlers, true)) {
+        $x->run(); // `$x` reads `string`, though the object it equals can be a `Foo` or a `Bar`
     }
 }
 ```
 
-In the branch where the check failed, `apply_in_array_narrowing`
-(`cond_narrowing/in_array.rs`) excludes the haystack's whole element type
-from the needle: the class layer through `apply_instanceof_exclusion`, and
-the rest through `strip_literal_from_type` once per alternative. Failing the
-check only proves the needle is none of the values the haystack holds, so
-the exclusion is sound only for a value the haystack is known to hold: an
-entry of a sealed shape, such as the literal `['draft', 'archived']`, whose
-type is one value. A `list<AdminUser>` haystack drops `AdminUser` from an
-`AdminUser|RegularUser` needle the same way, and
-`test_in_array_strict_else_branch_excludes` and its guard-clause siblings in
-`tests/integration/completion_in_array_narrowing.rs` assert that. PHPStan
-narrows this branch only when the haystack's element type is a finite set
-of values.
+In the branch where the check held, `apply_in_array_narrowing`
+(`cond_narrowing/in_array.rs`) narrows the needle's class layer through
+`apply_instanceof_inclusion`, which keeps only the classes the element type
+resolves to. An element that names no class it can load, such as `object`
+or a class that is not found, resolves to none, so every class goes and
+only the needle's scalar alternatives are left. The branch already skips an
+element that could be anything (`mixed`), but `object` can be any object as
+well, and a class that cannot be loaded may be an ancestor of the needle's.
 
-**Fix:** Exclude only the single values the haystack's type lists as
-present, and turn the tests that expect a class to be excluded around.
+**Fix:** Narrow the class layer only when every element alternative that
+can hold an object names a class that loads, and leave the needle's classes
+alone otherwise.
 
 ## Arithmetic
 
@@ -143,28 +139,7 @@ not contradict a list.
 
 ## Laravel
 
-### B566. A guard a package adds from its service provider is reported as unknown
-
-**Impact: Medium · Complexity: Medium**
-
-```php
-auth('sanctum')->user(); // reported: Unknown auth guard: 'sanctum'
-```
-
-`laravel/sanctum` adds its guard in `SanctumServiceProvider::register()`
-with `config(['auth.guards.sanctum' => …])`, not through
-`mergeConfigFrom()`, so the guard never reaches the config key index. A
-package's config is read only from the files its provider hands to
-`mergeConfigFrom()` (`extract_provider_resources` in
-`virtual_members/laravel/provider_resources.rs`), and runtime config writes
-only from project files (`config_write_keys` in `config_keys.rs` leaves
-vendor maps out, so that diagnostics do not depend on which vendor classes
-happen to be loaded). Every app that installs Sanctum and names its guard
-gets the diagnostic.
-
-**Fix:** Read the `config([...])` writes in the providers whose
-`mergeConfigFrom()` calls are already read, which is as deterministic as
-the merged files are.
+No outstanding items.
 
 ## Blade
 
