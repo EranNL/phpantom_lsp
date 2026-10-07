@@ -96,17 +96,22 @@ pub(super) fn locations_by_block<'a, 'l>(
     };
     for &loc in locations {
         let offset = position_to_byte_offset(&first.content, loc.range.start);
-        let index = blocks
-            .iter()
-            .position(|block| block.block.is_none_or(|(s, e)| offset >= s && offset <= e))
-            // Past the last block (e.g. code after its closing brace).
-            .unwrap_or(blocks.len() - 1);
-        grouped[index].1.push(loc);
+        grouped[FileRewrite::index_at(blocks, offset)].1.push(loc);
     }
     grouped
 }
 
 impl FileRewrite {
+    /// The index of the block of `blocks` containing `offset`, or of the
+    /// last block for an offset past every block (e.g. code after its
+    /// closing brace).
+    pub(super) fn index_at(blocks: &[FileRewrite], offset: usize) -> usize {
+        blocks
+            .iter()
+            .position(|block| block.block.is_none_or(|(s, e)| offset >= s && offset <= e))
+            .unwrap_or(blocks.len().saturating_sub(1))
+    }
+
     /// Decide what the file's in-code references become.
     ///
     /// - An import with an explicit alias keeps it, and references through

@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Moving a class imports what its own `namespace` block used.** In a file with several `namespace` blocks, moving a class, in the editor or with `phpantom_lsp move`, now imports the names its block reached through the old namespace, and no longer imports names another block wrote.
 - **Moving a class changes the right `namespace` block.** When several `namespace` blocks in one file each declare a class with the same short name, moving one of them, in the editor or with `phpantom_lsp move`, no longer rewrites another block's `namespace`.
 - **A function added by a watched file is found right away.** A function declared in a file created or changed on disk no longer keeps being reported as undefined while a diagnostic pass or hover is running.
 - **Global Laravel translation paths are recognised.** Translations registered with `loadTranslationsFrom($path)` now support completion, navigation, hover, and key diagnostics, including when the namespace is explicitly `null`. Analysis also finds translation files when `--project-root` is a relative path. Contributed by @shuvroroy.

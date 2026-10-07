@@ -13,6 +13,7 @@ use crate::text_position::offset_to_position;
 use crate::types::NamespaceSpan;
 
 use super::imports::namespace_owns;
+use super::rewrite::FileRewrite;
 use super::siblings::{SiblingImport, build_sibling_import_edits};
 
 /// The span naming where `fqn` is declared in a file.
@@ -312,24 +313,25 @@ pub(super) fn insert_namespace_edit(
     }
 }
 
-/// The edits that take a file's `namespace` statement out when the class
-/// moves into the global namespace.
+/// The edits that take the `namespace` statement of the block `file`
+/// stands for out when the class moves into the global namespace.
 ///
 /// `Ok(None)` when the statement is not one the move knows how to remove.
 pub(super) fn remove_namespace_edits(
     old_fqn: &str,
     file_uri_str: &str,
-    content: &str,
+    file: &FileRewrite,
     span_start: usize,
     span_end: usize,
     siblings: &[SiblingImport],
 ) -> Result<Option<Vec<TextEdit>>, String> {
+    let content = file.content.as_str();
     match namespace_statement(content, span_start, span_end) {
         NamespaceStatement::Statement {
             range,
             absorbed_blank_line,
         } => {
-            let use_block = crate::completion::use_edit::analyze_use_block(content);
+            let use_block = crate::completion::use_edit::analyze_use_block_in(content, file.block);
             // With no import block to sort into, a sibling import lands on
             // the line the removal takes away.  Writing both as one edit
             // keeps them off each other.
@@ -352,7 +354,7 @@ pub(super) fn remove_namespace_edits(
                 new_text,
             }];
             if !inline_siblings {
-                edits.extend(build_sibling_import_edits(content, siblings));
+                edits.extend(build_sibling_import_edits(file, siblings));
             }
             Ok(Some(edits))
         }

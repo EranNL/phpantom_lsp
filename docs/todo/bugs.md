@@ -272,37 +272,8 @@ refuses a file that mixes bracketed and unbracketed `namespace`
 declarations. A braced global block has no name for
 `namespace_declaration_edits` (`src/rename/class/mod.rs`) to rewrite, so the
 move takes the path for a file that had no `namespace` at all. Write the new
-name after the block's `namespace` keyword instead, and plan the imports the
-former global siblings now need against that block rather than the whole
-file.
-
-### B557. A class move plans its sibling imports against the whole file, not the block that declares the class
-
-**Impact: Low · Complexity: Medium**
-
-```php
-<?php
-namespace A { class Foo {} }
-namespace B { class Foo { public function f(): Helper {} } }
-```
-
-With `B\Helper` declared elsewhere, moving `B\Foo` to `C\Foo` leaves `Helper`
-unimported, so it now names `C\Helper`. `sibling_imports_for_move`
-(`src/rename/class/siblings.rs`) gives up when a file declares more than one
-named namespace, since it scans every span of the file against a single old
-namespace. A global block next to one named block slips past that check:
-
-```php
-<?php
-namespace { function g(): Helper {} }
-namespace B { class Foo {} }
-```
-
-Moving `B\Foo` to `C\Foo` appends `use B\Helper;` after the last block, an
-import for a name the global block never resolved through `B`, written outside
-every block. Scan only the declaring block, resolve it against the old
-namespace and that block's own imports, place the result with
-`analyze_use_block_in`, and drop the early return.
+name after the block's `namespace` keyword instead, and place the imports the
+former global siblings now need in that block.
 
 ### B558. Removing two unused members at the end of a group import breaks the statement
 
@@ -323,3 +294,45 @@ choose its comma knowing the rest of the batch: the one after it while every
 member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's `@use` group
 members (`group_member_removal`, in the same file) already chooses this way.
+
+### B559. An import written into a `namespace` block that sits on one line lands after the block
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace B { class Foo { public function f(): Helper {} } }
+```
+
+With `B\Helper` declared elsewhere, moving `B\Foo` to `C\Foo` writes
+`use B\Helper;` on the line below the block, outside every `namespace`, and
+PHP refuses the file. `analyze_use_block_in` (`src/completion/use_edit.rs`)
+puts the first import of a block that has none on the line after its
+`namespace` line, which is past the block when the block closes on that
+line, and every import planned through it shares the placement. The import
+belongs just after the `{` or `;` of the declaration, which `UseBlockInfo`
+cannot express: its positions are whole lines.
+
+### B560. Moving a class out of one section of a file with several unbraced `namespace` statements into the global namespace changes its namespace
+
+**Impact: Low · Complexity: Low**
+
+```php
+<?php
+namespace A;
+
+class Foo {}
+
+namespace B;
+
+class Bar {}
+```
+
+Moving `B\Bar` to `Bar` deletes the `namespace B;` line, and `Bar` is then
+declared in `A`, while every reference was rewritten to name the global
+class. Moving `A\Foo` instead leaves global code ahead of `namespace B;`,
+which PHP refuses. `remove_namespace_edits` (`src/rename/class/layout.rs`)
+treats an unbraced statement as removable whatever follows it, but in a file
+with several sections it is what separates them. Refuse the move the way a
+brace-style `namespace` is refused, since the sections would have to be
+rewritten as braced blocks.

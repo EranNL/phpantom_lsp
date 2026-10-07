@@ -333,7 +333,7 @@ impl Backend {
         let mut file_edits: Vec<TextEdit> = Vec::new();
 
         if is_definition_file && mv.namespace_changed {
-            match self.namespace_declaration_edits(mv, first, file_uri_str)? {
+            match self.namespace_declaration_edits(mv, &blocks, file_uri_str)? {
                 Some(edits) => file_edits.extend(edits),
                 None => return Ok(FileMoveEdits::Stale),
             }
@@ -450,26 +450,34 @@ impl Backend {
     fn namespace_declaration_edits(
         &self,
         mv: &ClassMove<'_>,
-        file: &FileRewrite,
+        blocks: &[FileRewrite],
         file_uri_str: &str,
     ) -> Result<Option<Vec<TextEdit>>, String> {
         let Some(sm) = self.symbol_maps.read().get(file_uri_str).cloned() else {
             return Ok(Some(Vec::new()));
         };
+
+        // In a file with several `namespace` blocks, the statement that
+        // moves is the one of the block declaring the class, and that
+        // block's own imports are what its former siblings are planned
+        // against.
+        let namespaces = self.namespace_spans_for_uri(file_uri_str);
+        let Some(class_start) =
+            class_declaration_span(&sm, &namespaces, mv.old_fqn).map(|class| class.start)
+        else {
+            return Ok(None);
+        };
+        let (Some(class_block), Some(file)) = (
+            NamespaceSpan::containing(&namespaces, class_start),
+            blocks.get(FileRewrite::index_at(blocks, class_start as usize)),
+        ) else {
+            return Ok(None);
+        };
         if !sm.matches_source(&file.content) {
             return Ok(None);
         }
 
-        // In a file with several `namespace` blocks, the statement that
-        // moves is the one of the block declaring the class.
-        let blocks = self.namespace_spans_for_uri(file_uri_str);
-        let Some(class_block) = class_declaration_span(&sm, &blocks, mv.old_fqn)
-            .and_then(|class| NamespaceSpan::containing(&blocks, class.start))
-        else {
-            return Ok(None);
-        };
-
-        let siblings = self.sibling_imports_for_move(&sm, &file.content, &file.use_map, mv.old_ns);
+        let siblings = self.sibling_imports_for_move(&sm, file, mv.old_ns);
 
         let declaration = sm.spans.iter().find_map(|s| match &s.kind {
             SymbolKind::NamespaceDeclaration { name }
@@ -501,7 +509,7 @@ impl Backend {
                     range: Range { start, end },
                     new_text: ns.to_string(),
                 }];
-                edits.extend(build_sibling_import_edits(&file.content, &siblings));
+                edits.extend(build_sibling_import_edits(file, &siblings));
                 Ok(Some(edits))
             }
             // The destination has no namespace to write in place of the
@@ -510,7 +518,7 @@ impl Backend {
             None => remove_namespace_edits(
                 mv.old_fqn,
                 file_uri_str,
-                &file.content,
+                file,
                 ns_span.start as usize,
                 ns_span.end as usize,
                 &siblings,
