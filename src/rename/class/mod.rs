@@ -21,11 +21,12 @@ use crate::Backend;
 use crate::code_actions::{document_changes_edit, multi_file_edit};
 use crate::symbol_map::SymbolKind;
 use crate::text_position::offset_to_position;
+use crate::types::NamespaceSpan;
 use crate::util::{build_fqn, strip_fqn_prefix};
 
 use super::RenameOutcome;
 use imports::{has_import_collision, namespace_owns, pick_collision_alias};
-use layout::{insert_namespace_edit, remove_namespace_edits};
+use layout::{class_declaration_span, insert_namespace_edit, remove_namespace_edits};
 use rewrite::{FileRewrite, locations_by_block};
 use siblings::build_sibling_import_edits;
 
@@ -63,17 +64,12 @@ impl Backend {
             .get(&definition_uri)
             .cloned()
             .ok_or_else(|| format!("Could not index the definition of `{old_fqn}`."))?;
-        let span = symbol_map
-            .spans
-            .iter()
-            .find(|span| {
-                matches!(
-                    &span.kind,
-                    SymbolKind::ClassDeclaration { name }
-                        if name.eq_ignore_ascii_case(crate::util::short_name(old_fqn))
-                )
-            })
-            .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
+        let span = class_declaration_span(
+            &symbol_map,
+            &self.namespace_spans_for_uri(&definition_uri),
+            old_fqn,
+        )
+        .ok_or_else(|| format!("Could not locate the declaration of `{old_fqn}`."))?;
         let position = offset_to_position(&content, span.start as usize);
         let locations = self
             .find_references_for_rename(&definition_uri, &content, position, true)
@@ -449,8 +445,8 @@ impl Backend {
     /// This is the one edit of a move built straight from symbol-map
     /// offsets rather than from a verified reference location, so it
     /// carries the same guard: `Ok(None)` abandons the move when the map
-    /// does not describe the file or the span no longer spells the
-    /// namespace it claims to.
+    /// does not describe the file, does not hold the class's declaration,
+    /// or the span no longer spells the namespace it claims to.
     fn namespace_declaration_edits(
         &self,
         mv: &ClassMove<'_>,
@@ -464,28 +460,25 @@ impl Backend {
             return Ok(None);
         }
 
+        // In a file with several `namespace` blocks, the statement that
+        // moves is the one of the block declaring the class.
+        let blocks = self.namespace_spans_for_uri(file_uri_str);
+        let Some(class_block) = class_declaration_span(&sm, &blocks, mv.old_fqn)
+            .and_then(|class| NamespaceSpan::containing(&blocks, class.start))
+        else {
+            return Ok(None);
+        };
+
         let siblings = self.sibling_imports_for_move(&sm, &file.content, &file.use_map, mv.old_ns);
 
-        // In a file with several `namespace` blocks, the statement that
-        // moves is the one of the block declaring the class: the last
-        // declaration before the class's own.
-        let class_start = sm
-            .spans
-            .iter()
-            .find(|s| {
-                matches!(&s.kind, SymbolKind::ClassDeclaration { name }
-                    if name.eq_ignore_ascii_case(mv.old_short_name))
-            })
-            .map_or(u32::MAX, |s| s.start);
-        let declaration = sm
-            .spans
-            .iter()
-            .filter(|s| s.start < class_start)
-            .filter_map(|s| match &s.kind {
-                SymbolKind::NamespaceDeclaration { name } => Some((s, name)),
-                _ => None,
-            })
-            .next_back();
+        let declaration = sm.spans.iter().find_map(|s| match &s.kind {
+            SymbolKind::NamespaceDeclaration { name }
+                if class_block.start <= s.start && s.end <= class_block.end =>
+            {
+                Some((s, name))
+            }
+            _ => None,
+        });
         let Some((ns_span, ns_name)) = declaration else {
             return Ok(Some(match mv.new_ns {
                 Some(ns) => vec![insert_namespace_edit(&file.content, ns, &siblings)],

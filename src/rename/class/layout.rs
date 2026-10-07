@@ -8,9 +8,35 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::composer::psr4_path_for_class;
+use crate::symbol_map::{SymbolKind, SymbolMap, SymbolSpan};
 use crate::text_position::offset_to_position;
+use crate::types::NamespaceSpan;
 
+use super::imports::namespace_owns;
 use super::siblings::{SiblingImport, build_sibling_import_edits};
+
+/// The span naming where `fqn` is declared in a file.
+///
+/// A file with several `namespace` blocks can declare the same short name
+/// in more than one of them, so the name alone does not say which
+/// declaration is the class: it has to sit in a block of the namespace
+/// `fqn` names.
+pub(super) fn class_declaration_span<'a>(
+    symbol_map: &'a SymbolMap,
+    blocks: &[NamespaceSpan],
+    fqn: &str,
+) -> Option<&'a SymbolSpan> {
+    let short_name = crate::util::short_name(fqn);
+    symbol_map.spans.iter().find(|span| {
+        matches!(&span.kind, SymbolKind::ClassDeclaration { name }
+            if name.eq_ignore_ascii_case(short_name))
+            && namespace_owns(
+                NamespaceSpan::containing(blocks, span.start)
+                    .and_then(|block| block.namespace.as_deref()),
+                fqn,
+            )
+    })
+}
 
 /// What the source around a `namespace` name turns out to be, once the
 /// move needs to take the whole declaration away rather than rewrite

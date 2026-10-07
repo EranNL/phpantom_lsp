@@ -1149,3 +1149,148 @@ async fn class_move_adds_the_import_to_the_block_that_needs_it() {
         )
     );
 }
+
+#[tokio::test]
+async fn class_move_rewrites_the_block_that_declares_the_class() {
+    // Both blocks declare `Foo`; the move names the second one, so the
+    // first block's `namespace` statement has to stay as it is.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_from_the_first_block_leaves_the_second_block_alone() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 1, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace C { class Foo {} }\n",
+            "namespace B { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_out_of_a_named_block_after_a_global_block_rewrites_the_named_block() {
+    // The global block has no `namespace` name to find, so the class the
+    // move names is not the first `Foo` in the file.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace { class Foo {} }\n",
+        "namespace B { class Foo {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace { class Foo {} }\n",
+            "namespace C { class Foo {} }\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_rewrites_the_statement_of_the_unbraced_section_that_declares_the_class() {
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "class Foo {}\n",
+        "namespace B;\n",
+        "class Foo {}\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 4, 8, "C\\Foo")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A;\n",
+            "class Foo {}\n",
+            "namespace C;\n",
+            "class Foo {}\n",
+        )
+    );
+}
+
+#[tokio::test]
+async fn class_move_rewrites_the_block_of_a_namespace_that_is_declared_twice() {
+    // Naming the namespace does not say which of its blocks holds the
+    // class, so the class's own position has to.
+    let backend = create_test_backend();
+    let uri = Url::parse("file:///src/Shapes.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A { class Foo {} }\n",
+        "namespace A { class Bar {} }\n",
+    );
+
+    open_php(&backend, &uri, text).await;
+
+    let ws = rename(&backend, &uri, 2, 20, "C\\Bar")
+        .await
+        .expect("Expected a workspace edit for the class move");
+    let result = apply_edits(text, &edits_for_uri(&ws, &uri));
+
+    assert_eq!(
+        result,
+        concat!(
+            "<?php\n",
+            "namespace A { class Foo {} }\n",
+            "namespace C { class Bar {} }\n",
+        )
+    );
+}

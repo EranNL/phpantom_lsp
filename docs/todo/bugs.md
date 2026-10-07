@@ -177,23 +177,6 @@ No outstanding items.
 
 ## Miscellaneous
 
-### B548. Moving a class rewrites the wrong `namespace` block when two blocks declare the same short name
-
-**Impact: Low · Complexity: Low**
-
-```php
-<?php
-namespace A { class Foo {} }
-namespace B { class Foo {} }
-```
-
-Moving `B\Foo` to `C\Foo` rewrites `namespace A`. The move finds the class
-being moved as the first `ClassDeclaration` span with its short name
-(`src/rename/class/mod.rs`) and then takes the namespace declaration before
-that span, without checking that the class it found is the one in the
-namespace being moved. Match the declaration inside the old namespace's
-block.
-
 ### B549. `@throws` and namespaced-function completions plan their import against the whole file
 
 **Impact: Low · Complexity: Low-Medium**
@@ -252,3 +235,49 @@ handle), keep the backing type.
 
 Found running the php-typing-conformance suite
 (`phpdoc_advanced_fallback_value_of_template_enum.php`).
+
+### B556. Moving a class out of a braced global `namespace { }` block writes an unbracketed `namespace`
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+<?php
+namespace { class Foo {} }
+```
+
+Moving `Foo` to `C\Foo` inserts `namespace C;` above the block, and PHP
+refuses a file that mixes bracketed and unbracketed `namespace`
+declarations. A braced global block has no name for
+`namespace_declaration_edits` (`src/rename/class/mod.rs`) to rewrite, so the
+move takes the path for a file that had no `namespace` at all. Write the new
+name after the block's `namespace` keyword instead, and plan the imports the
+former global siblings now need against that block rather than the whole
+file.
+
+### B557. A class move plans its sibling imports against the whole file, not the block that declares the class
+
+**Impact: Low · Complexity: Medium**
+
+```php
+<?php
+namespace A { class Foo {} }
+namespace B { class Foo { public function f(): Helper {} } }
+```
+
+With `B\Helper` declared elsewhere, moving `B\Foo` to `C\Foo` leaves `Helper`
+unimported, so it now names `C\Helper`. `sibling_imports_for_move`
+(`src/rename/class/siblings.rs`) gives up when a file declares more than one
+named namespace, since it scans every span of the file against a single old
+namespace. A global block next to one named block slips past that check:
+
+```php
+<?php
+namespace { function g(): Helper {} }
+namespace B { class Foo {} }
+```
+
+Moving `B\Foo` to `C\Foo` appends `use B\Helper;` after the last block, an
+import for a name the global block never resolved through `B`, written outside
+every block. Scan only the declaring block, resolve it against the old
+namespace and that block's own imports, place the result with
+`analyze_use_block_in`, and drop the early return.
