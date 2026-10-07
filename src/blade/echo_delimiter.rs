@@ -50,8 +50,9 @@ fn blade_echo_delimiter_at(content: &str, offset: usize) -> Option<EchoDelimiter
         .filter_map(|back| offset.checked_sub(back))
         .find_map(|start| {
             let rest = content.get(start..)?;
-            // `{{--` opens a comment, not an echo.
-            if rest.starts_with("{{--") {
+            // `{{--` opens a comment, not an echo, and in `{{!!` the raw
+            // echo opens at the second `{`, so the first is a literal brace.
+            if rest.starts_with("{{--") || rest.starts_with("{{!!") {
                 return None;
             }
             let (text, raw, _) = DELIMITERS.iter().find(|(text, _, mode)| {
@@ -261,6 +262,45 @@ mod tests {
                     delimiter_at(content, offset),
                     None,
                     "offset {offset} of {content:?} is inside {lookalike:?}, which is no echo"
+                );
+            }
+        }
+    }
+
+    /// Blade matches echo tags longest-opening-first, so `{{!!$a!!}}` is a
+    /// literal `{`, a raw echo, and a literal `}`. The raw echo keeps its
+    /// own delimiters and the braces around it are not delimiters at all,
+    /// whether or not an `@` sits in front of them, which escapes only an
+    /// echo it comes directly before.
+    #[test]
+    fn a_raw_echo_inside_literal_braces_keeps_its_own_delimiters() {
+        // Every delimiter of the template, as `(start, len, raw)`.
+        for (content, delimiters) in [
+            ("{{!!$a!!}}", vec![(1, 3, true), (6, 3, true)]),
+            ("{{!! $a !!}}", vec![(1, 3, true), (8, 3, true)]),
+            ("<p>{{!!$a!!}}</p>", vec![(4, 3, true), (9, 3, true)]),
+            ("@{{!!$a!!}}", vec![(2, 3, true), (7, 3, true)]),
+            (
+                "{{$a}}{{!!$b!!}}{{$c}}",
+                vec![
+                    (0, 2, false),
+                    (4, 2, false),
+                    (7, 3, true),
+                    (12, 3, true),
+                    (16, 2, false),
+                    (20, 2, false),
+                ],
+            ),
+        ] {
+            for offset in 0..=content.len() {
+                let expected = delimiters
+                    .iter()
+                    .find(|(start, len, _)| (*start..start + *len as usize).contains(&offset))
+                    .copied();
+                assert_eq!(
+                    delimiter_at(content, offset),
+                    expected,
+                    "offset {offset} of {content:?}"
                 );
             }
         }

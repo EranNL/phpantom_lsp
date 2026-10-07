@@ -251,10 +251,11 @@ mod tests {
     }
 
     /// A `{{`/`}}` lookalike inside a `{{-- --}}` comment, a `@verbatim`
-    /// block, or an `@`-escaped `@{{ … }}` echo is literal output in all
-    /// three cases, none of it compiling to the `e()` call a genuine echo
-    /// delimiter does. Go-to-definition on any of them must not answer with
-    /// `e()`'s declaration.
+    /// block, or an `@`-escaped `@{{ … }}` echo, and the braces around a raw
+    /// echo written `{{!! … !!}}`, are literal output in all four cases,
+    /// none of it compiling to the `e()` call a genuine echo delimiter does.
+    /// Go-to-definition on any of them must not answer with `e()`'s
+    /// declaration.
     #[tokio::test]
     async fn an_echo_lookalike_outside_a_real_echo_does_not_lead_to_e() {
         let composer = r#"{"autoload": {"psr-4": {"App\\": "app/"}}}"#;
@@ -270,6 +271,10 @@ mod tests {
             ("@verbatim\n{{ 'x' }}\n@endverbatim\n", 1, 0),
             // The `{{` of an `@`-escaped echo.
             ("@{{ 'x' }}\n", 0, 1),
+            // The braces around a raw echo.
+            ("{{!!$html!!}}\n", 0, 0),
+            ("{{!!$html!!}}\n", 0, 12),
+            ("@{{!!$html!!}}\n", 0, 1),
         ] {
             let (backend, dir) = create_psr4_workspace(
                 composer,

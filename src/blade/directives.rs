@@ -1426,4 +1426,29 @@ mod tests {
             );
         }
     }
+
+    /// An `@` escapes an echo only when it comes directly before the echo's
+    /// opener. Blade matches echo tags longest-opening-first, so in
+    /// `@{{!!$a!!}}` the raw echo starts at the second `{` and the `@` is
+    /// text.
+    #[test]
+    fn an_at_before_a_raw_echo_inside_literal_braces_escapes_nothing() {
+        for (src, literal_end) in [("@{{ $a }}", 9), ("@{!! $a !!}", 11)] {
+            assert!(
+                matches!(
+                    directive_head(src, src.as_bytes(), 0, src.len()),
+                    DirectiveHead::LiteralEcho(end) if end == literal_end
+                ),
+                "{src:?} is a literal echo"
+            );
+        }
+        let src = "@{{!!$a!!}}";
+        assert!(
+            matches!(
+                directive_head(src, src.as_bytes(), 0, src.len()),
+                DirectiveHead::None(1)
+            ),
+            "{src:?} escapes nothing"
+        );
+    }
 }

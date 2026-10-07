@@ -72,6 +72,13 @@ pub(super) fn open_escaped(
         return None;
     }
 
+    // The `@` escapes only the echo it comes directly before. With `{{!!`
+    // the raw echo opens at the second `{` (see `open`), so there is no
+    // escaped echo here, only the `@` and a literal brace in front of it.
+    if remaining.starts_with(&['@', '{', '{', '!', '!']) {
+        return None;
+    }
+
     // The `@` escapes the complete Blade echo for a frontend template
     // engine. Mask everything through its closing delimiter rather than
     // exposing the expression as PHP.

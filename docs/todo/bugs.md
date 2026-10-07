@@ -143,31 +143,32 @@ No outstanding items.
 
 ## Blade
 
-### B570. A raw echo written inside literal braces is read as an escaped echo
+### B571. A `{{!!` with no `!!}` after it is read as a raw echo
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```blade
-{{!!$html!!}}
+<p>{{!!$flag}}</p>
 ```
 
-Blade matches echo tags longest-opening-first, so this is a literal `{`, a
-raw echo of `$html`, and a literal `}`, which is how the preprocessor lowers
-it. Hovering the `!!` of the raw opener shows the hover of `$html`, and the
-braces around the echo show `e()`.
+A double negation written without a space. Blade compiles a raw echo only
+when a `!!}` follows the `{!!`, and with none the escaped echo compiles to
+`e(!!$flag)`. `echo::open` (`src/blade/preprocessor/echo.rs`) reads every
+`{{!!` as a literal `{` and a raw echo, so the template lowers to
+`echo $flag}};` and reports a cascade of syntax errors. `{{ !!$flag }}` is
+fine.
 
-`mode_at` (`src/blade/directive_completion.rs`) reads the `{{` of `{{!!` as
-an escaped echo opener and scans on to the next `}}`, so
-`blade_echo_delimiter_at` (`src/blade/echo_delimiter.rs`) never sees the raw
-opener inside it. `is_echo_start` and `echo_delimiters`
-(`src/blade/signature.rs`) read it the same way.
+`open_escaped` (the `@{{!!` form), `mode_at`
+(`src/blade/directive_completion.rs`), `blade_echo_delimiter_at`
+(`src/blade/echo_delimiter.rs`) and `is_echo_start`
+(`src/blade/signature.rs`) apply the same rule, so hover, directive
+completion, the formatter and semantic tokens read the echo as a raw one
+too.
 
-**Fix:** Make the three scanners agree with `echo::open`
-(`src/blade/preprocessor/echo.rs`): a `{{` followed by `!!` is a literal
-brace, and the raw echo starts at the second `{`. `mode_at` also feeds the
-component-tag and block-pairing checks (`src/blade/component_tags/mod.rs`,
-`src/blade/blocks.rs`) and directive completion, so run those alongside the
-hover tests.
+**Fix:** Read a `{{!!` as a literal brace only when a `!!}` follows it.
+`EchoCloses` already answers that for the preprocessor. The scanners ask per
+`{`, so they need the position of the last `!!}` worked out once per scan,
+not a search forward from every opener.
 
 ## Templates
 

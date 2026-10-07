@@ -1316,6 +1316,20 @@ fn test_preprocess_raw_echo_wrapped_in_extra_braces() {
     );
 }
 
+/// An `@` escapes an echo only when it comes directly before the echo's
+/// opener, so the raw echo in `@{{!! $v !!}}` is not escaped: it compiles,
+/// and the `@` and the first brace are text.
+#[test]
+fn test_preprocess_raw_echo_wrapped_in_extra_braces_after_an_at() {
+    let content = "@{{!! $html !!}}";
+    let (php, _) = preprocess(content);
+    assert!(
+        php.contains("echo  $html ;"),
+        "the raw echo after the `@` should still compile: {}",
+        php
+    );
+}
+
 #[test]
 fn test_preprocess_raw_and_escaped_echo_close_independently() {
     let content = "{!! $html !!} and {{ $safe }}";
