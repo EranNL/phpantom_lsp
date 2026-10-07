@@ -42,6 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Files outside the project no longer break indexing.** A PHP file opened from elsewhere, or a file change in another folder of the editor's workspace, no longer stops the server when the configuration changes or drops the other file changes reported with it.
 - **Blade `@break` and `@continue` keep their condition.** `@break($done)` and `@continue($skip)` in a loop now only leave the iteration when the condition holds, instead of being read as an unconditional jump.
 - **An integer `range()` passed straight into a call is a list of integers.** `array_map(fn (int $i) => …, range(0, $n - 1))` no longer reports that the callback is passed `int|float`. Contributed by @phcorp. Closes #467.
+- **A Blade template's first import no longer breaks the view.** When a template's first line opens a block, such as `@if` or a component tag, completing a class adds its `@use` above that line instead of inside the block, where the view would no longer compile. A template that opens with `@php` gets the import as a `use` statement inside that block.
+- **Unused `@use` imports in Blade templates are dimmed.** A `@use` directive that nothing in the template uses is now shown as unused, the way an unused PHP import is, and `phpantom_lsp fix` removes it.
+- **A `@use` group import wrapped over several lines no longer shifts a Blade template.** Hover, diagnostics and go-to-definition no longer land on the wrong line for the rest of a template that wraps a `@use('App\Models\{...}')` list over several lines.
 
 ## [0.11.0] - 2026-10-05
 

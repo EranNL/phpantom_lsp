@@ -6,7 +6,8 @@
 //! which editors render as dimmed text.
 //!
 //! We only check class-level `use` imports, including `use function` and
-//! `use const`, but not trait `use` inside class bodies.
+//! `use const`, but not trait `use` inside class bodies.  A Blade template's
+//! `@use` directives are imports too, reported at the directive.
 
 use std::collections::HashSet;
 
@@ -14,7 +15,9 @@ use tower_lsp::lsp_types::*;
 
 use crate::Backend;
 use crate::backend::file_access::ImportBlock;
+use crate::blade::use_directive::find_use_directive;
 use crate::symbol_map::SymbolKind;
+use crate::text_position::byte_range_to_lsp_range;
 
 use super::helpers::{ByteRange, is_offset_in_ranges, make_tagged_diagnostic};
 use super::use_statements::{
@@ -182,6 +185,12 @@ impl Backend {
             .filter(|&(start, _)| start >= search_range.0 && start <= search_range.1)
             .collect();
 
+        // A template's `@use` directives are hoisted into the prologue of its
+        // virtual PHP, which no template text stands behind, so one nothing
+        // uses is reported where the template wrote it.  The template is
+        // read once an import turns out to be unused.
+        let mut template = None;
+
         // ── Safety-net: scan raw content for missed references ──────────
         //
         // For each still-unused alias, scan the block's content for the
@@ -201,9 +210,18 @@ impl Backend {
                 continue;
             }
 
-            if let Some(range) =
-                find_use_statement_range(self, uri, content, alias, fqn, &block_statements)
-            {
+            let template = template.get_or_insert_with(|| {
+                self.is_blade_file(uri)
+                    .then(|| self.get_file_content_arc(uri))
+                    .flatten()
+            });
+            let range = template
+                .as_deref()
+                .and_then(|template| use_directive_range(template, fqn, alias))
+                .or_else(|| {
+                    find_use_statement_range(self, uri, content, alias, fqn, &block_statements)
+                });
+            if let Some(range) = range {
                 out.push(make_tagged_diagnostic(
                     range,
                     DiagnosticSeverity::HINT,
@@ -412,6 +430,13 @@ fn line_contains_phpdoc_type_tag(line: &str) -> bool {
 /// Check whether a byte is a valid PHP identifier character.
 fn is_ident_char(b: u8) -> bool {
     b.is_ascii_alphanumeric() || b == b'_' || b == b'\\' || b > 0x7F
+}
+
+/// The range of the `@use` directive in `template`, a Blade template's own
+/// text, that imports `fqn` as `alias`.
+fn use_directive_range(template: &str, fqn: &str, alias: &str) -> Option<Range> {
+    let span = find_use_directive(template, fqn, alias)?;
+    Some(byte_range_to_lsp_range(template, span.start, span.end))
 }
 
 /// Find the source range of the `use` statement that imports a given FQN

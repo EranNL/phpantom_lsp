@@ -1946,6 +1946,29 @@ fn test_preprocess_use_directive_function_modifier() {
     );
 }
 
+/// A group import wrapped over several lines is hoisted with its line
+/// breaks, and every line it adds is prologue: counted short, every
+/// position in the template would map that many lines off.
+#[test]
+fn test_preprocess_wrapped_use_directive_keeps_positions_aligned() {
+    use tower_lsp::lsp_types::Position;
+
+    let content = "@use('App\\Models\\{\n    Post,\n    Comment,\n}')\n<p>{{ $title }}</p>\n";
+    let (php, map) = preprocess(content);
+    let title = Position {
+        line: 4,
+        character: 6,
+    };
+    let lowered = map.blade_to_php(title);
+    assert!(
+        php.lines()
+            .nth(lowered.line as usize)
+            .is_some_and(|line| line.contains("$title")),
+        "the template's lines must sit where the map says they do: {php}"
+    );
+    assert_eq!(map.try_php_to_blade(lowered), Some(title));
+}
+
 /// `@inject('metrics', 'App\Services\Metrics')` becomes an inline
 /// `$metrics = app(...)` assignment so the injected variable is defined
 /// and typed, and does not corrupt the rest of the template.

@@ -107,6 +107,10 @@ a way a translated edit corrupts or misplaces template text):
   Collectors that compare a diagnostic's range with a virtual one must
   translate the diagnostic's range: `remove_unused_import.rs` (the overlap
   test, and the line it deletes on resolve) and `insert_translation_key.rs`.
+  An unused `@use` directive has no virtual range to translate to, since it
+  lowers to nothing: its removal is planned against the template's own text
+  (`build_use_directive_deletion_edit`, which `fix` already uses) and kept
+  out of the translation.
   `create_missing_view.rs` builds its attached diagnostic from a virtual
   range and has to build it in the template's coordinates
   (`Backend::offset_range_to_lsp_range`).
@@ -121,8 +125,8 @@ a way a translated edit corrupts or misplaces template text):
   directive from it). An edit in the prologue or in the wrapper's closing
   lines rejects the whole action. Import edits are the one kind written in
   Blade rather than PHP, at the positions `use_block.rs` chooses, and are
-  checked against those positions instead (see B550 for where the first
-  import belongs).
+  checked against those positions instead, as is the removal of an unused
+  `@use` directive.
 - **Resolve before offering.** A deferred action can resolve to nothing in
   a template (extract variable inside `{{ }}`, whose statement starts in
   generated code; inline variable on a name only the prologue assigns), so

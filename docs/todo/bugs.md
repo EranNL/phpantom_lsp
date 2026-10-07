@@ -132,44 +132,7 @@ No outstanding items.
 
 ## Blade
 
-### B550. A template's first import lands inside the block its first line opens
-
-**Impact: Medium · Complexity: Medium**
-
-```blade
-@if ($user)
-    {{ Carbon::now() }}
-@endif
-```
-
-Completing `Carbon` writes `@use('Carbon\Carbon')` after the first line,
-inside the `@if`. Blade compiles `@use` to a PHP `use` statement where it
-stands, and PHP rejects one inside a block, so the view no longer compiles.
-An import that sorts before every existing `@use` goes to the template's
-start only when that start survives the trip through the source map
-(`analyze_template_use_block`, `src/blade/use_block.rs`); a first line
-that opens with `{{`, a directive, or a component tag does not, because a
-Blade position at the start of a token maps to the end of the PHP it
-lowers to, so the import moves after the line instead. The start of the
-virtual line maps back to the template's start for such a line (it is
-where the generated PHP begins), so the import can be planned there. A
-template that opens with `@php` or `<?php` takes the import as a PHP `use`
-just inside that block, and only a leading directive that lowers to
-nothing at all (`@use`, `@inject`) leaves the end of the first line as the
-place. BL1's "Import class" action writes its import through the same
-code.
-
-### B551. An unused `@use` import in a template is never reported
-
-**Impact: Low · Complexity: Medium**
-
-`collect_unused_import_diagnostics` reads the virtual PHP, where the
-preprocessor hoisted each `@use` directive into the prologue as a real
-`use` statement. The diagnostic's range lands in the prologue, which maps
-to no template position, so it is dropped: a `use` inside `@php` is
-reported, a `@use` directive never is. Report it at the directive's own
-range (the scanner in `src/blade/use_directive.rs` knows where each one
-is), and teach "Remove unused import" to delete the directive.
+No outstanding items.
 
 ## Templates
 
@@ -281,3 +244,23 @@ import for a name the global block never resolved through `B`, written outside
 every block. Scan only the declaring block, resolve it against the old
 namespace and that block's own imports, place the result with
 `analyze_use_block_in`, and drop the early return.
+
+### B558. Removing two unused members at the end of a group import breaks the statement
+
+**Impact: Medium · Complexity: Low-Medium**
+
+```php
+use App\Models\{User, Post, Comment};   // only User is used
+```
+
+"Remove all unused imports" and `phpantom_lsp fix` turn this into
+`use App\Models\{User, `, dropping the closing `};`. Each member is removed
+on its own by `extend_range_for_group_member`
+(`src/code_actions/remove_unused_import.rs`): a member takes the comma after
+it, or the one before it when it is the last, so `Post` takes `Post, ` and
+`Comment` takes `, Comment`. The two edits overlap, and `apply_text_edits`
+applies the second against text the first already changed. A member has to
+choose its comma knowing the rest of the batch: the one after it while every
+member before it is removed too, the one before it otherwise. That way no
+two removals share a comma. The removal of a template's `@use` group
+members (`group_member_removal`, in the same file) already chooses this way.

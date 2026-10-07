@@ -115,7 +115,9 @@ mod naming;
 pub(crate) mod phpstan;
 mod promote_constructor_param;
 mod remove_unused_import;
-pub(crate) use remove_unused_import::{build_line_deletion_edit, cursor_on_use_import_line};
+pub(crate) use remove_unused_import::{
+    build_line_deletion_edit, build_use_directive_deletion_edit, cursor_on_use_import_line,
+};
 mod replace_deprecated;
 mod replace_fqcn;
 mod simplify_null;

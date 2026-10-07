@@ -32,7 +32,11 @@ pub(super) fn open(
                 replacement = "".to_string();
                 next_mode = Mode::Html;
             } else if directive == "verbatim" {
-                replacement = "".to_string();
+                // Nothing in the block lowers to anything, so the directive
+                // keeps a column of its own: otherwise the start of its
+                // line would map back past it, into the block, and an
+                // import planned before it would land where it is inert.
+                replacement = " ".to_string();
                 next_mode = Mode::Verbatim;
             } else if directive == "empty" {
                 // @empty with parens = if(empty(...)):, without parens = forelse separator

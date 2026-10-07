@@ -14,6 +14,7 @@ mod tag;
 #[cfg(test)]
 mod tests;
 
+pub(crate) use capture_args::build_use_statement;
 pub use component_call::ARGUMENT_VAR_PREFIX;
 pub use resolver::{ComponentBinding, ComponentParameter, ComponentResolver, ComponentTarget};
 
@@ -595,14 +596,16 @@ pub fn preprocess_with_vars(
 
     // Splice the collected `@use` imports into the prologue as real
     // top-level `use` statements, and grow the prologue height by the
-    // lines they add so every Blade position still maps correctly.
+    // lines they add so every Blade position still maps correctly.  A
+    // group import wrapped over several lines keeps its line breaks, so
+    // the lines are counted rather than the statements.
     if !hoisted_uses.is_empty() {
         let mut block = String::new();
         for stmt in &hoisted_uses {
             block.push_str(stmt);
             block.push('\n');
         }
-        source_map.prologue_lines += hoisted_uses.len() as u32;
+        source_map.prologue_lines += block.matches('\n').count() as u32;
         virtual_php.insert_str(uses_insert_at, &block);
     }
 
