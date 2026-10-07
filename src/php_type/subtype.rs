@@ -259,7 +259,7 @@ impl PhpType {
         // and never see the entries the shape lists, so two shapes are
         // settled here, entry by entry.
         if let (Some(sub), Some(wider)) = (self.shape_parts(), supertype.shape_parts()) {
-            return shape_is_subshape(&sub, &wider);
+            return shape_is_subshape(&sub, &wider, &|a, b| a.is_subtype_of(b));
         }
 
         // ── ArrayShape <: array / iterable ──────────────────────────
@@ -478,7 +478,15 @@ impl PhpType {
 /// merely allows may still turn up in the tail of an unsealed `sub`, holding
 /// what that tail holds. And the tail of `sub` has to fit the tail of
 /// `wider`, which a sealed shape does not have.
-fn shape_is_subshape(sub: &ShapeParts<'_>, wider: &ShapeParts<'_>) -> bool {
+///
+/// `is_subtype` compares the key and value types of two entries, so that the
+/// structural check and the one that follows the class hierarchy into the
+/// entries answer by the same rules.
+pub(crate) fn shape_is_subshape(
+    sub: &ShapeParts<'_>,
+    wider: &ShapeParts<'_>,
+    is_subtype: &dyn Fn(&PhpType, &PhpType) -> bool,
+) -> bool {
     // `list{…}` says so outright; a shape tracked from a literal or from
     // appends says so by holding `0, 1, 2, …` in order, which a tail that
     // may add keys of its own no longer promises.
@@ -497,13 +505,11 @@ fn shape_is_subshape(sub: &ShapeParts<'_>, wider: &ShapeParts<'_>) -> bool {
         match wider_keys.iter().position(|wider_key| wider_key == key) {
             Some(index) => {
                 (!entry.optional || wider.entries[index].optional)
-                    && entry
-                        .value_type
-                        .is_subtype_of(&wider.entries[index].value_type)
+                    && is_subtype(&entry.value_type, &wider.entries[index].value_type)
             }
             None => wider.tail.is_some_and(|(tail_key, tail_value)| {
-                shape_key_type(key).is_subtype_of(tail_key)
-                    && entry.value_type.is_subtype_of(tail_value)
+                is_subtype(&shape_key_type(key), tail_key)
+                    && is_subtype(&entry.value_type, tail_value)
             }),
         }
     });
@@ -515,8 +521,8 @@ fn shape_is_subshape(sub: &ShapeParts<'_>, wider: &ShapeParts<'_>) -> bool {
         keys.contains(key)
             || (entry.optional
                 && sub.tail.is_none_or(|(tail_key, tail_value)| {
-                    !shape_key_type(key).is_subtype_of(tail_key)
-                        || tail_value.is_subtype_of(&entry.value_type)
+                    !is_subtype(&shape_key_type(key), tail_key)
+                        || is_subtype(tail_value, &entry.value_type)
                 }))
     });
     if !wider_fit {
@@ -525,7 +531,7 @@ fn shape_is_subshape(sub: &ShapeParts<'_>, wider: &ShapeParts<'_>) -> bool {
 
     sub.tail.is_none_or(|(tail_key, tail_value)| {
         wider.tail.is_some_and(|(wider_key, wider_value)| {
-            tail_key.is_subtype_of(wider_key) && tail_value.is_subtype_of(wider_value)
+            is_subtype(tail_key, wider_key) && is_subtype(tail_value, wider_value)
         })
     })
 }

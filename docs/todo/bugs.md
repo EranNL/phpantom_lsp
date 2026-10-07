@@ -156,50 +156,69 @@ No outstanding items.
 
 ## Array types
 
-### B564. Two comparisons still read an unsealed array shape as the plain array it widens to
+### B565. A plain array counts as a subtype of an unsealed array shape
 
 **Impact: Low · Complexity: Low-Medium**
 
 ```php
-/** @return array{foo: string, ...} */
-function makeOpen(): array { return ['foo' => 'x']; }
-
-/** @param array<string, int> $map */
-function takeMap(array $map): void {}
-
-takeMap(makeOpen());     // not reported: `foo` is a string
-takeMap(['foo' => 'x']); // reported
+/** @param array{foo: int, ...} $shape */
+function takeOpen(array $shape): void {}
 ```
 
-`kind()` reads a `TypeKind::UnsealedShape` as the generic array it widens
-to, so a comparison that matches on `kind()` never sees the entries the
-shape lists. The shape-to-shape rules in `is_subtype_of`,
-`is_type_compatible` and `missing_required_shape_keys` read it through
-`shape_parts()` now. Two more places still do not:
+`array<string, int>` is a subtype of `array{foo: int, ...}` as far as
+`is_subtype_of_typed` is concerned, and `non-empty-array<string, int>` is
+one for `PhpType::is_subtype_of` too, though nothing says either array
+holds `foo`. The same goes for `list<int>` and `non-empty-list<int>`
+against `list{int, ...}`. The shape-to-shape rules read an unsealed shape
+through `shape_parts()`, but a subtype that is not itself a shape reaches
+an unsealed supertype as the `non-empty-array<array-key, mixed>` it widens
+to, which any array-like generic fits. The class-aware generic covariance
+rule in `is_subtype_of_typed` does not even check the `non-empty-` promise,
+which is why a bare `array<string, int>` passes there. A sealed supertype
+has no such problem: `non-empty-array<string, int>` is not a subtype of
+`array{foo: int}`. Parameter seeding reads the answer as a proven
+narrowing of the declared type.
 
-- The `ArrayShape → typed array` rule in `is_type_compatible`
-  (`src/diagnostics/type_errors/compatibility.rs`) matches
-  `TypeKind::ArrayShape`, so an unsealed argument skips it and reaches a
-  typed array parameter as the `non-empty-array<array-key, mixed>` it
-  widens to, where the `mixed` tail swallows the listed entries. A sealed
-  literal is held to its entries by that rule, which is why the last line
-  above is reported.
-- `is_subtype_of_typed` (`src/class_lookup.rs`) falls back to its
-  generic-array rules when the structural check says no, and compares two
-  unsealed shapes as the arrays they widen to: `array{foo: int, ...}` is a
-  subtype of `array{foo: string, ...}`, which parameter seeding reads as
-  a proven narrowing of the declared type.
+**Fix:** Settle an array-like generic against an unsealed supertype as an
+unsealed shape with no entries of its own, `array{...<K, V>}` (or
+`list{...<V>}` for a list), through `shape_is_subshape`: an entry the
+supertype requires is then missing, and an optional one has to fit the
+tail. Do it in `PhpType::is_subtype_of` and, ahead of the generic-array
+rules, in `is_subtype_of_typed`. The argument diagnostic answers a typed
+array handed to an unsealed parameter through its own rules, not through
+these two functions; keep it that way, so that an array that merely might
+hold the entries stays unreported.
 
-**Fix:** Read the argument through `shape_parts()` in the `ArrayShape →
-typed array` rule. Hold its listed entries to the parameter's key and
-value types as for a sealed shape, and its tail to them as for the type
-arguments of an array. The rule has to move above the same-base generic
-rule, which answers first for an unsealed argument. In
-`is_subtype_of_typed`, settle a pair of shapes, either of them unsealed,
-by the entries they list before the generic-array rules. Sharing
-`shape_is_subshape` with a class-aware element comparison would let it
-follow the class hierarchy into the entries, which it does not for sealed
-shapes either.
+### B566. A `list` parameter rejects a docblock shape keyed by class constants
+
+**Impact: Low · Complexity: Low-Medium**
+
+```php
+class Slots { const NAME = 0; const AGE = 1; }
+
+/** @return array{Slots::NAME: string, Slots::AGE: int} */
+function row(): array { return ['Ann', 30]; }
+
+/** @param list<string|int> $values */
+function takeList(array $values): void {}
+
+takeList(row()); // reported, though the keys are `0` and `1`
+```
+
+`shape_fits_array` (`src/diagnostics/type_errors/compatibility.rs`) holds
+the keys of a shape to the integers a list demands by their spelling, and
+a key spelled `Slots::NAME` is not one, so the shape is rejected whatever
+the constant evaluates to. An array literal does not have the problem,
+because its keys are evaluated: `[Slots::NAME => 'Ann']` is typed
+`array<0, 'Ann'>`. A docblock keeps the spelling, and `shape_key_type` can
+only call such a key an `array-key`.
+
+**Fix:** Evaluate the constant. When the class is loadable and the constant
+holds an integer or string literal, read the key as that value in
+`shape_fits_array`, and in the structural list check
+(`shape_keys_are_sequential`), which reads the same spelling as a string
+key. A constant that cannot be evaluated stays an `array-key`, which does
+not contradict a list.
 
 ## Laravel
 
@@ -207,7 +226,23 @@ No outstanding items.
 
 ## Blade
 
-No outstanding items.
+### B567. The Laravel example's `analyze` run reports a fourth error
+
+**Impact: Low · Complexity: Low**
+
+`phpantom_lsp analyze --project-root examples/laravel` is documented in
+`docs/CONTRIBUTING.md` to report exactly the three deliberate mistakes in
+`app/Demo.php`. It also reports `Unused variable '$rowLabel'` at
+`resources/views/admin/users/index.blade.php:36`. The template assigns
+`$rowLabel` in `@php` and reads it only in a `:data-label` binding on a
+plain `<tr>`, which Blade no longer analyses as PHP now that only `<x-…>`
+component tags evaluate bound attributes, so the variable is unused as far
+as the engine can tell. The comment above the line still says the
+expression is real PHP.
+
+**Fix:** Make the demo say what it means: put the bound attributes on a
+component tag the example project defines, or read `$rowLabel` where Blade
+does evaluate it. Then the run is back to three errors.
 
 ## Templates
 

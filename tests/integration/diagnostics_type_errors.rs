@@ -10614,6 +10614,233 @@ take(['foo' => 'x']);
     assert!(messages[0].contains("foo: 'x'"), "got {messages:?}");
 }
 
+/// An unsealed argument is held to the entries it lists when it reaches a
+/// typed array, as a sealed one is, and not to the plain array it widens to,
+/// whose `mixed` tail swallows them.
+#[test]
+fn an_unsealed_argument_is_held_to_the_entries_it_lists_by_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: string, ...} */
+function makeOpen(): array { return ['foo' => 'x']; }
+
+/** @return array{foo: int, ...} */
+function makeOpenInts(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeMap(array $map): void {}
+
+takeMap(makeOpen());
+takeMap(['foo' => 'x']);
+takeMap(makeOpenInts());
+takeMap(['foo' => 1]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{foo: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("foo: 'x'"),
+        "the literal is reported too, got {messages:?}"
+    );
+}
+
+/// The keys an unsealed argument lists are held to the key type of the
+/// parameter, and so is the key of its tail.
+#[test]
+fn the_keys_of_an_unsealed_argument_are_held_to_the_key_type_of_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @return array{0: int, ...} */
+function makeIntKeyed(): array { return [1]; }
+
+/** @return array{foo: int, ...<string, int>} */
+function makeStringTail(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<int, int>} */
+function makeIntTail(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<array-key, int>} */
+function makeAnyKeyTail(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeStringKeyed(array $map): void {}
+
+/** @param array<int, int> $map */
+function takeIntKeyed(array $map): void {}
+
+takeStringKeyed(makeOpen());
+takeStringKeyed(makeStringTail());
+takeStringKeyed(makeAnyKeyTail());
+takeStringKeyed(makeIntKeyed());
+takeStringKeyed(makeIntTail());
+takeIntKeyed(makeIntKeyed());
+takeIntKeyed(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 3, "got {messages:?}");
+    assert!(
+        messages[0].contains("got array{0: int, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("got array{foo: int, ...<int, int>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[2].contains("got array{foo: int, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// What an unsealed argument holds beyond the entries it lists is held to the
+/// value type of the parameter as the values of an array are: never coerced
+/// to fit, whatever the file's `strict_types`.
+#[test]
+fn the_tail_of_an_unsealed_argument_is_held_to_the_value_type_of_a_typed_array() {
+    let php = r#"<?php
+/** @return array{foo: int, ...<string, string>} */
+function makeStrings(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...<string, int>} */
+function makeInts(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array<string, int> $map */
+function takeInts(array $map): void {}
+
+/** @param array<string, string|int> $map */
+function takeBoth(array $map): void {}
+
+/** @param int[] $values */
+function takeSlice(array $values): void {}
+
+takeInts(makeStrings());
+takeInts(makeInts());
+takeInts(makeOpen());
+takeBoth(makeStrings());
+takeSlice(makeStrings());
+takeSlice(makeInts());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages
+            .iter()
+            .all(|m| m.contains("got array{foo: int, ...<string, string>}")),
+        "got {messages:?}"
+    );
+}
+
+/// An unsealed `list{…, ...}` argument is a list, so it satisfies a `list`
+/// parameter, while an unsealed shape that lists a string key is not one.
+#[test]
+fn an_unsealed_argument_is_held_to_the_list_a_typed_array_demands() {
+    let php = r#"<?php
+/** @return list{string, ...<string>} */
+function makeNames(): array { return ['a']; }
+
+/** @return list{int, ...<int>} */
+function makeInts(): array { return [1]; }
+
+/** @return array{name: string, ...} */
+function makeNamed(): array { return ['name' => 'x']; }
+
+/** @param list<string> $names */
+function takeNames(array $names): void {}
+
+takeNames(makeNames());
+takeNames(makeInts());
+takeNames(makeNamed());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+    assert!(
+        messages[0].contains("got list{int, ...<int>}"),
+        "got {messages:?}"
+    );
+    assert!(
+        messages[1].contains("got array{name: string, ...<array-key, mixed>}"),
+        "got {messages:?}"
+    );
+}
+
+/// A value that fits the entries an unsealed argument lists is not reported
+/// because the rest of its type is unknown.
+#[test]
+fn an_unsealed_argument_that_fits_a_typed_array_is_not_reported() {
+    let php = r#"<?php
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, bar: int, ...<string, int>} */
+function makeTwo(): array { return ['foo' => 1, 'bar' => 2]; }
+
+/** @return list{string, ...} */
+function makeList(): array { return ['a']; }
+
+/** @param array<string, int> $map */
+function takeMap(array $map): void {}
+
+/** @param array<string, int|string> $map */
+function takeMixed(array $map): void {}
+
+/** @param non-empty-array<string, int> $map */
+function takeNonEmpty(array $map): void {}
+
+/** @param array<array-key, mixed> $map */
+function takeAnything(array $map): void {}
+
+function takeBare(array $map): void {}
+
+/** @param list<mixed> $values */
+function takeList(array $values): void {}
+
+takeMap(makeOpen());
+takeMap(makeTwo());
+takeMixed(makeOpen());
+takeNonEmpty(makeOpen());
+takeNonEmpty(makeTwo());
+takeAnything(makeOpen());
+takeBare(makeOpen());
+takeList(makeList());
+takeMap(['foo' => 1, ...makeTwo()]);
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+}
+
+/// The listed entries of an unsealed argument are coerced to the value type
+/// of the parameter as those of a sealed shape are, so `strict_types`
+/// decides whether an `int` entry fits a `string` value type.
+#[test]
+fn the_listed_entries_of_an_unsealed_argument_follow_strict_types_like_a_sealed_shapes() {
+    let lenient = r#"<?php
+/** @return array{foo: int} */
+function makeSealed(): array { return ['foo' => 1]; }
+
+/** @return array{foo: int, ...} */
+function makeOpen(): array { return ['foo' => 1]; }
+
+/** @param array<string, string> $map */
+function takeStrings(array $map): void {}
+
+takeStrings(makeSealed());
+takeStrings(makeOpen());
+"#;
+    let messages = messages_with_code(&collect(lenient), "type_mismatch_argument");
+    assert!(messages.is_empty(), "got {messages:?}");
+
+    let strict = lenient.replacen("<?php\n", "<?php\ndeclare(strict_types=1);\n", 1);
+    let messages = messages_with_code(&collect(&strict), "type_mismatch_argument");
+    assert_eq!(messages.len(), 2, "got {messages:?}");
+}
+
 // ─── List order ─────────────────────────────────────────────────────────────
 
 /// `array_is_list()` is `false` for a literal whose keys are written out
@@ -10708,6 +10935,41 @@ takesItems($items);
 "#;
     let messages = messages_with_code(&collect(php), "type_mismatch_argument");
     assert!(messages.is_empty(), "got {messages:?}");
+}
+
+// ─── Shape keys spelled as class constants ──────────────────────────────────
+
+/// A docblock keeps a key spelled `Slots::FIRST`, which says nothing about
+/// the key it evaluates to, so it is no more a string than an integer. A
+/// `Slots::class` key is a class name, which is a string whatever else.
+#[test]
+fn a_shape_key_spelled_as_a_class_constant_is_not_a_string_to_a_typed_array() {
+    let php = r#"<?php
+class Slots { const FIRST = 0; }
+
+/** @return array{Slots::FIRST: string} */
+function byConstant(): array { return ['a']; }
+
+/** @return array{Slots::class: string} */
+function byClassName(): array { return ['Slots' => 'a']; }
+
+/** @param array<int, string> $items */
+function takeIntKeyed(array $items): void {}
+
+/** @param array<string, string> $items */
+function takeStringKeyed(array $items): void {}
+
+takeIntKeyed(byConstant());
+takeStringKeyed(byConstant());
+takeIntKeyed(byClassName());
+takeStringKeyed(byClassName());
+"#;
+    let messages = messages_with_code(&collect(php), "type_mismatch_argument");
+    assert_eq!(messages.len(), 1, "got {messages:?}");
+    assert!(
+        messages[0].contains("expects array<int, string>, got array{Slots::class: string}"),
+        "got {messages:?}"
+    );
 }
 
 // ─── Short ternary ──────────────────────────────────────────────────────────

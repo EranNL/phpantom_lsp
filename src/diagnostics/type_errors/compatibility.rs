@@ -266,6 +266,49 @@ fn shape_is_compatible(
         })
 }
 
+/// Whether an array shape, sealed or unsealed, passes where a typed array is
+/// expected.
+///
+/// Every key and value the shape lists is one the array holds, so each has
+/// to fit what the parameter declares, and a shape with no entries at all is
+/// the empty array a `non-empty-*` parameter rejects.  What an unsealed
+/// shape holds beyond them is known only by its tail, which is judged the
+/// way the type arguments of an array are: its keys and values are never
+/// coerced to fit, whatever the file's `strict_types`.
+fn shape_fits_array(
+    arg: &ShapeParts<'_>,
+    demand: &ArrayDemand<'_>,
+    class_loader: &dyn Fn(&str) -> Option<Arc<ClassInfo>>,
+    strict_types: bool,
+) -> bool {
+    if demand.non_empty && arg.entries.is_empty() {
+        return false;
+    }
+    let listed_fit = shape_keys(arg.entries)
+        .iter()
+        .zip(arg.entries)
+        .all(|(key, entry)| {
+            (!demand.list || crate::php_type::is_canonical_int_key(key))
+                && demand.key.is_none_or(|key_type| {
+                    // A key is never coerced to fit, whatever the file's
+                    // `strict_types`: PHP decides it when the array is built.
+                    is_type_compatible(&shape_key_type(key), key_type, class_loader, true)
+                })
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(&entry.value_type, value_type, class_loader, strict_types)
+                })
+        });
+    listed_fit
+        && arg.tail.is_none_or(|(tail_key, tail_value)| {
+            demand
+                .key
+                .is_none_or(|key_type| is_type_compatible(tail_key, key_type, class_loader, true))
+                && demand.value.is_none_or(|value_type| {
+                    is_type_compatible(tail_value, value_type, class_loader, true)
+                })
+        })
+}
+
 /// `arg` seen as its generic ancestor `ancestor_name`, carrying the type
 /// arguments its `@extends`/`@implements` chain binds on the way up:
 /// `IntBox` with `@extends Box<int>` is a `Box<int>`.
@@ -808,6 +851,19 @@ pub(crate) fn is_type_compatible(
         return shape_is_compatible(&arg_shape, &param_shape, class_loader, strict_types);
     }
 
+    // ── Array shape → typed array ───────────────────────────────
+    // `array{id: string, index: string, body: array}` is accepted where
+    // `array<string, mixed>` or similar is expected: the shape is a more
+    // specific form of the typed array.  Like the rule above, it has to
+    // come before the generic-array rules, which an unsealed shape would
+    // reach as the array it widens to: that array's `mixed` tail swallows
+    // the entries the shape lists.
+    if let Some(arg_shape) = arg_type.shape_parts()
+        && let Some(demand) = ArrayDemand::of(param_type)
+    {
+        return shape_fits_array(&arg_shape, &demand, class_loader, strict_types);
+    }
+
     // ── Bare array ↔ typed array: MAYBE ─────────────────────────
     // A bare `array` is untyped — it *might* satisfy `array<K,V>`,
     // `list<X>`, `T[]`, or an array shape.  We can't prove it wrong.
@@ -1276,51 +1332,6 @@ pub(crate) fn is_type_compatible(
         if is_array_like {
             return true;
         }
-    }
-
-    // ── ArrayShape → typed array ────────────────────────────────
-    // `array{id: string, index: string, body: array}` is accepted where
-    // `array<string, mixed>` or similar is expected: the shape is a more
-    // specific form of the typed array.  Every key and value the shape
-    // names is one the array holds, so each has to fit what the
-    // parameter declares, and a shape with no entries at all is the
-    // empty array a `non-empty-*` parameter rejects.
-    if let TypeKind::ArrayShape(arg_entries) = arg_type.kind()
-        && let Some(demand) = ArrayDemand::of(param_type)
-    {
-        if demand.non_empty && arg_entries.is_empty() {
-            return false;
-        }
-        let key_fits = |key: &str| {
-            let is_int = crate::php_type::is_canonical_int_key(key);
-            if demand.list && !is_int {
-                return false;
-            }
-            demand.key.is_none_or(|key_type| {
-                let key_value = if is_int {
-                    PhpType::literal_int(key)
-                } else {
-                    PhpType::literal_string_value(key)
-                };
-                // A key is never coerced to fit, whatever the file's
-                // `strict_types`: PHP decides it when the array is built.
-                is_type_compatible(&key_value, key_type, class_loader, true)
-            })
-        };
-        return shape_keys(arg_entries)
-            .iter()
-            .zip(arg_entries.iter())
-            .all(|(key, entry)| {
-                key_fits(key)
-                    && demand.value.is_none_or(|value_type| {
-                        is_type_compatible(
-                            &entry.value_type,
-                            value_type,
-                            class_loader,
-                            strict_types,
-                        )
-                    })
-            });
     }
 
     // ── Typed array → ArrayShape: MAYBE ─────────────────────────
