@@ -309,7 +309,7 @@ member before it is removed too, the one before it otherwise. That way no
 two removals share a comma. The removal of a template's `@use` group
 members (`group_member_removal`, in the same file) already chooses this way.
 
-### B559. An import written into a `namespace` block that sits on one line lands after the block
+### B562. An import written into a `namespace` block that sits on one line lands after the block
 
 **Impact: Low · Complexity: Medium**
 
@@ -327,9 +327,9 @@ line, and every import planned through it shares the placement. The import
 belongs just after the `{` or `;` of the declaration, which `UseBlockInfo`
 cannot express: its positions are whole lines.
 
-### B560. Moving a class out of one section of a file with several unbraced `namespace` statements into the global namespace changes its namespace
+### B563. Moving a class that shares its `namespace` section with other declarations changes their namespace too
 
-**Impact: Low · Complexity: Low**
+**Impact: Low-Medium · Complexity: Medium**
 
 ```php
 <?php
@@ -337,16 +337,14 @@ namespace A;
 
 class Foo {}
 
-namespace B;
-
-class Bar {}
+class Baz {}
 ```
 
-Moving `B\Bar` to `Bar` deletes the `namespace B;` line, and `Bar` is then
-declared in `A`, while every reference was rewritten to name the global
-class. Moving `A\Foo` instead leaves global code ahead of `namespace B;`,
-which PHP refuses. `remove_namespace_edits` (`src/rename/class/layout.rs`)
-treats an unbraced statement as removable whatever follows it, but in a file
-with several sections it is what separates them. Refuse the move the way a
-brace-style `namespace` is refused, since the sections would have to be
-rewritten as braced blocks.
+Moving `A\Foo` to `C\Foo` rewrites `namespace A;` to `namespace C;`, which makes
+`Baz` a `C\Baz` while every reference to `A\Baz` is left alone, and the file
+moves to the new PSR-4 path with it. Moving `A\Foo` to `Foo` removes the
+statement and makes `Baz` global the same way. `namespace_declaration_edits`
+(`src/rename/class/mod.rs`) rewrites or removes the statement of the section
+that declares the class without asking what else the section declares. Refuse
+the move when the section holds any other class-like, function, or constant,
+the way a brace-style `namespace` is refused.

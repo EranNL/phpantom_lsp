@@ -291,6 +291,38 @@ async fn rename_class_move_into_global_namespace_refuses_a_brace_namespace() {
 }
 
 #[tokio::test]
+async fn rename_class_move_into_global_namespace_refuses_unbraced_namespace_sections() {
+    // Each `namespace` statement ends the section before it, so dropping
+    // one either folds its section into the previous one or leaves global
+    // code ahead of the next `namespace`, which PHP refuses.
+    let backend = Backend::new_test();
+
+    let uri = Url::parse("file:///src/Sections.php").unwrap();
+    let text = concat!(
+        "<?php\n",
+        "namespace A;\n",
+        "\n",
+        "class Foo {}\n",
+        "\n",
+        "namespace B;\n",
+        "\n",
+        "class Bar {}\n",
+    );
+
+    open_file(&backend, &uri, text).await;
+
+    for (old_fqn, new_fqn) in [("A\\Foo", "Foo"), ("B\\Bar", "Bar")] {
+        let error = backend
+            .plan_class_move(old_fqn, new_fqn)
+            .expect_err("a section's `namespace` statement cannot simply be dropped");
+        assert!(
+            error.contains("several `namespace` statements"),
+            "Moving `{old_fqn}` should be refused for the shape it cannot handle; got: {error}"
+        );
+    }
+}
+
+#[tokio::test]
 async fn rename_macro_registration_string_updates_call_sites() {
     let backend = Backend::new_test();
     let class_uri = Url::parse("file:///Widget.php").unwrap();

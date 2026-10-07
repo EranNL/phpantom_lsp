@@ -316,7 +316,10 @@ pub(super) fn insert_namespace_edit(
 /// The edits that take the `namespace` statement of the block `file`
 /// stands for out when the class moves into the global namespace.
 ///
-/// `Ok(None)` when the statement is not one the move knows how to remove.
+/// `Ok(None)` when the statement is not one the move knows how to remove,
+/// and `Err` when taking it out would mean rewriting the file's block
+/// structure: unwrapping a brace block, or turning one of several
+/// statement sections into a block.
 pub(super) fn remove_namespace_edits(
     old_fqn: &str,
     file_uri_str: &str,
@@ -327,6 +330,16 @@ pub(super) fn remove_namespace_edits(
 ) -> Result<Option<Vec<TextEdit>>, String> {
     let content = file.content.as_str();
     match namespace_statement(content, span_start, span_end) {
+        // With several sections, the statement is what keeps this one
+        // apart from its neighbours: without it the class folds into the
+        // section above, and when no section is above, global code is left
+        // ahead of the next `namespace` statement, which PHP refuses.
+        NamespaceStatement::Statement { .. } if file.block.is_some() => Err(format!(
+            "Cannot move `{}` into the global namespace: {} holds several `namespace` \
+             statements, which the move would have to rewrite as brace blocks.",
+            old_fqn,
+            display_uri(file_uri_str)
+        )),
         NamespaceStatement::Statement {
             range,
             absorbed_blank_line,
